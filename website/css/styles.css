@@ -14,7 +14,7 @@
   --border: #2d2d30;
   --radius: 12px;
   --radius-sm: 8px;
-  --max-width: 1200px;
+  --max-width: 1400px;
   --nav-height: 64px;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
@@ -167,42 +167,60 @@ ul { list-style: none; }
 
 /* ---- Hero ---- */
 .hero {
-  padding: calc(var(--nav-height) + 60px) 24px 80px;
-  text-align: center;
+  padding: var(--nav-height) 48px 0;
   max-width: var(--max-width);
   margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1fr 1.4fr;
+  gap: 60px;
+  align-items: center;
+  min-height: 100vh;
+}
+
+.hero-content {
+  text-align: left;
 }
 
 .hero-headline {
-  font-size: 4rem;
+  font-size: 3.75rem;
   font-weight: 800;
-  line-height: 1.05;
+  line-height: 1.1;
   letter-spacing: -0.03em;
-  margin-bottom: 24px;
-  white-space: nowrap;
+  margin-bottom: 20px;
 }
 
 .hero-tagline {
-  font-size: 1.5rem;
+  font-size: 1.2rem;
   color: var(--text-secondary);
   margin-bottom: 32px;
-  max-width: 600px;
-  margin-left: auto;
-  margin-right: auto;
+  line-height: 1.6;
 }
 
 .hero-cta {
   display: flex;
   gap: 16px;
-  justify-content: center;
   flex-wrap: wrap;
-  margin-bottom: 64px;
+  margin-bottom: 24px;
+}
+
+.hero-install {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 16px;
+}
+
+.hero-install code {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  color: var(--text-secondary);
 }
 
 /* ---- Showcase (Video/Screenshot Player) ---- */
 .showcase {
-  max-width: 840px;
-  margin: 0 auto;
+  max-width: 100%;
 }
 
 .showcase-tabs {
@@ -618,8 +636,17 @@ ul { list-style: none; }
     margin-bottom: 80px;
   }
 
-  .hero-headline { font-size: 3.25rem; }
-  .hero-tagline { font-size: 1.25rem; }
+  .hero {
+    grid-template-columns: 1fr;
+    text-align: center;
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+  .hero-content { text-align: center; }
+  .hero-cta { justify-content: center; }
+  .hero-install { margin: 0 auto; }
+  .hero-headline { font-size: 3rem; }
+  .hero-tagline { font-size: 1.15rem; }
 }
 
 /* Mobile */
@@ -651,12 +678,12 @@ ul { list-style: none; }
   }
 
   .hero {
-    padding-top: calc(var(--nav-height) + 40px);
-    padding-bottom: 60px;
+    padding: calc(var(--nav-height) + 40px) 16px 60px;
+    min-height: auto;
   }
-  .hero-headline { font-size: 2.25rem; white-space: normal; }
-  .hero-tagline { font-size: 1.1rem; }
-  .hero-cta { margin-bottom: 48px; }
+  .hero-headline { font-size: 2.25rem; }
+  .hero-tagline { font-size: 1.05rem; }
+  .hero-install code { font-size: 0.75rem; }
 
   .showcase-tabs {
     gap: 6px;
