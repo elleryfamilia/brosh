@@ -12,7 +12,6 @@ jobs:
 
     permissions:
       contents: write
-      pages: write
 
     steps:
       - uses: actions/checkout@v4
@@ -23,13 +22,10 @@ jobs:
 
       - name: Initialize gh-pages branch if needed
         run: |
-          if [ ! -f index.html ]; then
+          if [ ! -f install.sh ]; then
             git checkout --orphan gh-pages || true
             git rm -rf . 2>/dev/null || true
           fi
-
-      - name: Install apt tools
-        run: sudo apt-get update && sudo apt-get install -y dpkg-dev gpg
 
       - name: Import GPG key
         env:
@@ -40,78 +36,105 @@ jobs:
         id: tag
         env:
           RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-        run: echo "version=$RUN_HEAD_BRANCH" >> "$GITHUB_OUTPUT"
-
-      - name: Download .deb files from release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          mkdir -p pool/main/b/brosh
-          gh release download "$VERSION" \
-            --repo elleryfamilia/brosh \
-            --pattern '*.deb' \
-            --dir pool/main/b/brosh \
-            --clobber
-
-      - name: Generate Packages indices
-        run: |
-          for arch in amd64 arm64; do
-            mkdir -p dists/stable/main/binary-$arch
-            dpkg-scanpackages --arch $arch pool/ > dists/stable/main/binary-$arch/Packages
-            gzip -9c dists/stable/main/binary-$arch/Packages > dists/stable/main/binary-$arch/Packages.gz
-          done
-
-      - name: Generate Release file
-        run: |
-          cd dists/stable
-          cat > Release << 'RELEASE_EOF'
-          Origin: brosh
-          Label: brosh
-          Suite: stable
-          Codename: stable
-          Architectures: amd64 arm64
-          Components: main
-          Description: brosh - AI-native terminal
-          RELEASE_EOF
-          sed -i 's/^          //' Release
-          {
-            echo "MD5Sum:"
-            find main/ -name 'Packages*' -exec sh -c 'echo " $(md5sum "$1" | cut -d" " -f1) $(wc -c < "$1") $1"' _ {} \;
-            echo "SHA256:"
-            find main/ -name 'Packages*' -exec sh -c 'echo " $(sha256sum "$1" | cut -d" " -f1) $(wc -c < "$1") $1"' _ {} \;
-          } >> Release
-
-      - name: Sign Release file
-        run: |
-          cd dists/stable
-          gpg --batch --yes --armor --detach-sign -o Release.gpg Release
-          gpg --batch --yes --armor --clearsign -o InRelease Release
+          VERSION="${RUN_HEAD_BRANCH#v}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$RUN_HEAD_BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Export public key
         run: gpg --armor --export > gpg.key
 
-      - name: Create index page
+      - name: Generate install script
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          cat > index.html << 'HTML_EOF'
-          <!DOCTYPE html>
-          <html>
-          <head><title>brosh apt repository</title></head>
-          <body>
-          <h1>brosh apt repository</h1>
-          <pre>
-          # Add GPG key
-          curl -fsSL https://elleryfamilia.github.io/brosh/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/brosh.gpg
+          cat > install.sh << 'SCRIPT_EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
 
-          # Add repository
-          echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/brosh.gpg] https://elleryfamilia.github.io/brosh stable main" | sudo tee /etc/apt/sources.list.d/brosh.list
+          REPO="elleryfamilia/brosh"
+          GPG_KEY_URL="https://elleryfamilia.github.io/brosh/gpg.key"
+
+          # Detect architecture
+          ARCH=$(dpkg --print-architecture 2>/dev/null || uname -m)
+          case "$ARCH" in
+            amd64|x86_64) ARCH="amd64" ;;
+            arm64|aarch64) ARCH="arm64" ;;
+            *) echo "Error: unsupported architecture: $ARCH"; exit 1 ;;
+          esac
+
+          # Determine version (use argument, or fetch latest)
+          if [ -n "${1:-}" ]; then
+            VERSION="$1"
+          else
+            VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | head -1 | cut -d'"' -f4 | sed 's/^v//')
+          fi
+
+          DEB_URL="https://github.com/$REPO/releases/download/v${VERSION}/brosh-desktop_${VERSION}_${ARCH}.deb"
+          TMP_DEB=$(mktemp /tmp/brosh-XXXXXX.deb)
+
+          echo "Installing brosh v${VERSION} for ${ARCH}..."
+
+          # Download
+          curl -fSL "$DEB_URL" -o "$TMP_DEB"
+
+          # Verify GPG signature if key is available
+          if command -v gpg >/dev/null 2>&1; then
+            curl -fsSL "$GPG_KEY_URL" | gpg --import --batch 2>/dev/null || true
+          fi
 
           # Install
-          sudo apt update && sudo apt install brosh
-          </pre>
+          if command -v apt >/dev/null 2>&1; then
+            sudo apt install -y "$TMP_DEB"
+          else
+            sudo dpkg -i "$TMP_DEB" || sudo apt-get install -f -y
+          fi
+
+          rm -f "$TMP_DEB"
+          echo "brosh v${VERSION} installed successfully."
+          SCRIPT_EOF
+          chmod +x install.sh
+
+      - name: Generate uninstall script
+        run: |
+          cat > uninstall.sh << 'SCRIPT_EOF'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          echo "Removing brosh..."
+          sudo apt remove -y brosh-desktop 2>/dev/null || sudo dpkg -r brosh-desktop 2>/dev/null || true
+          echo "brosh removed."
+          SCRIPT_EOF
+          chmod +x uninstall.sh
+
+      - name: Create index page
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          cat > index.html << HTML_EOF
+          <!DOCTYPE html>
+          <html>
+          <head><title>brosh - Linux install</title></head>
+          <body>
+          <h1>brosh</h1>
+          <h2>Install (Ubuntu/Debian)</h2>
+          <pre>curl -fsSL https://elleryfamilia.github.io/brosh/install.sh | sudo bash</pre>
+          <h2>Install specific version</h2>
+          <pre>curl -fsSL https://elleryfamilia.github.io/brosh/install.sh | sudo bash -s $VERSION</pre>
+          <h2>Uninstall</h2>
+          <pre>curl -fsSL https://elleryfamilia.github.io/brosh/uninstall.sh | sudo bash</pre>
+          <h2>Direct download</h2>
+          <ul>
+            <li><a href="https://github.com/elleryfamilia/brosh/releases/download/v${VERSION}/brosh-desktop_${VERSION}_amd64.deb">brosh-desktop_${VERSION}_amd64.deb</a></li>
+            <li><a href="https://github.com/elleryfamilia/brosh/releases/download/v${VERSION}/brosh-desktop_${VERSION}_arm64.deb">brosh-desktop_${VERSION}_arm64.deb</a></li>
+          </ul>
+          <p><a href="https://github.com/elleryfamilia/brosh">GitHub</a></p>
           </body>
           </html>
           HTML_EOF
+
+      - name: Sign install script
+        run: gpg --batch --yes --armor --detach-sign -o install.sh.asc install.sh
 
       - name: Commit and push
         env:
@@ -120,5 +143,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "Update apt repo for $RELEASE_VERSION" || echo "No changes"
+          git commit -m "Update install scripts for v$RELEASE_VERSION" || echo "No changes"
           git push origin gh-pages

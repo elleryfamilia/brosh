@@ -18,12 +18,10 @@
 brew install --cask elleryfamilia/brosh/brosh
 ```
 
-**Ubuntu/Debian (apt):**
+**Ubuntu/Debian:**
 
 ```bash
-curl -fsSL https://elleryfamilia.github.io/brosh/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/brosh.gpg
-echo "deb [signed-by=/usr/share/keyrings/brosh.gpg] https://elleryfamilia.github.io/brosh stable main" | sudo tee /etc/apt/sources.list.d/brosh.list
-sudo apt update && sudo apt install brosh
+curl -fsSL https://elleryfamilia.github.io/brosh/install.sh | sudo bash
 ```
 
 **Arch Linux (AUR):**
