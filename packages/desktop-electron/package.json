@@ -172,6 +172,9 @@
       "category": "Development",
       "target": ["deb"],
       "executableName": "brosh"
+    },
+    "deb": {
+      "afterInstall": "build/afterInstall-linux.sh"
     }
   }
 }
