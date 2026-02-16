@@ -16,16 +16,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: gh-pages
-          fetch-depth: 0
-        continue-on-error: true
-
-      - name: Initialize gh-pages branch if needed
-        run: |
-          if [ ! -f install.sh ]; then
-            git checkout --orphan gh-pages || true
-            git rm -rf . 2>/dev/null || true
-          fi
+          ref: main
 
       - name: Import GPG key
         env:
@@ -42,19 +33,16 @@ jobs:
           echo "tag=$RUN_HEAD_BRANCH" >> "$GITHUB_OUTPUT"
 
       - name: Export public key
-        run: gpg --armor --export > gpg.key
+        run: gpg --armor --export > website/gpg.key
 
       - name: Generate install script
-        env:
-          VERSION: ${{ steps.tag.outputs.version }}
-          TAG: ${{ steps.tag.outputs.tag }}
         run: |
-          cat > install.sh << 'SCRIPT_EOF'
+          cat > website/install.sh << 'SCRIPT_EOF'
           #!/usr/bin/env bash
           set -euo pipefail
 
           REPO="elleryfamilia/brosh"
-          GPG_KEY_URL="https://elleryfamilia.github.io/brosh/gpg.key"
+          GPG_KEY_URL="https://bro.sh/gpg.key"
 
           # Detect architecture
           ARCH=$(dpkg --print-architecture 2>/dev/null || uname -m)
@@ -94,47 +82,21 @@ jobs:
           rm -f "$TMP_DEB"
           echo "brosh v${VERSION} installed successfully."
           SCRIPT_EOF
-          chmod +x install.sh
+          chmod +x website/install.sh
 
       - name: Generate uninstall script
         run: |
-          cat > uninstall.sh << 'SCRIPT_EOF'
+          cat > website/uninstall.sh << 'SCRIPT_EOF'
           #!/usr/bin/env bash
           set -euo pipefail
           echo "Removing brosh..."
           sudo apt remove -y brosh-desktop 2>/dev/null || sudo dpkg -r brosh-desktop 2>/dev/null || true
           echo "brosh removed."
           SCRIPT_EOF
-          chmod +x uninstall.sh
-
-      - name: Create index page
-        env:
-          VERSION: ${{ steps.tag.outputs.version }}
-        run: |
-          cat > index.html << HTML_EOF
-          <!DOCTYPE html>
-          <html>
-          <head><title>brosh - Linux install</title></head>
-          <body>
-          <h1>brosh</h1>
-          <h2>Install (Ubuntu/Debian)</h2>
-          <pre>curl -fsSL https://elleryfamilia.github.io/brosh/install.sh | sudo bash</pre>
-          <h2>Install specific version</h2>
-          <pre>curl -fsSL https://elleryfamilia.github.io/brosh/install.sh | sudo bash -s $VERSION</pre>
-          <h2>Uninstall</h2>
-          <pre>curl -fsSL https://elleryfamilia.github.io/brosh/uninstall.sh | sudo bash</pre>
-          <h2>Direct download</h2>
-          <ul>
-            <li><a href="https://github.com/elleryfamilia/brosh/releases/download/v${VERSION}/brosh-desktop_${VERSION}_amd64.deb">brosh-desktop_${VERSION}_amd64.deb</a></li>
-            <li><a href="https://github.com/elleryfamilia/brosh/releases/download/v${VERSION}/brosh-desktop_${VERSION}_arm64.deb">brosh-desktop_${VERSION}_arm64.deb</a></li>
-          </ul>
-          <p><a href="https://github.com/elleryfamilia/brosh">GitHub</a></p>
-          </body>
-          </html>
-          HTML_EOF
+          chmod +x website/uninstall.sh
 
       - name: Sign install script
-        run: gpg --batch --yes --armor --detach-sign -o install.sh.asc install.sh
+        run: gpg --batch --yes --armor --detach-sign -o website/install.sh.asc website/install.sh
 
       - name: Commit and push
         env:
@@ -142,6 +104,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add website/install.sh website/uninstall.sh website/gpg.key website/install.sh.asc
           git commit -m "Update install scripts for v$RELEASE_VERSION" || echo "No changes"
-          git push origin gh-pages
+          git push origin main

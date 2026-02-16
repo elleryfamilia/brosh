@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>brosh - The AI-native terminal</title>
+  <meta name="description" content="A modern terminal emulator with built-in AI integration via MCP. Natural language detection, split panes, Git sidebar, sandbox mode, and more.">
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="brosh - The AI-native terminal">
+  <meta property="og:description" content="A modern terminal emulator with built-in AI integration via MCP. Built for Claude coders.">
+  <meta property="og:image" content="assets/images/brosh_startscreen.png">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="brosh - The AI-native terminal">
+  <meta name="twitter:description" content="A modern terminal emulator with built-in AI integration via MCP. Built for Claude coders.">
+  <meta name="twitter:image" content="assets/images/brosh_startscreen.png">
+
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/images/32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="assets/images/16x16.png">
+  <link rel="icon" type="image/png" sizes="256x256" href="assets/images/256x256.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="assets/images/512x512.png">
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <!-- Sticky Nav -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="#" class="nav-logo">
+        <img src="assets/images/brosh_logo.svg" alt="brosh" height="32">
+      </a>
+      <button class="nav-toggle" id="nav-toggle" aria-label="Toggle menu">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="#features">Features</a>
+        <a href="#download">Download</a>
+        <a href="https://github.com/elleryfamilia/brosh" target="_blank" rel="noopener" class="nav-github">
+          GitHub
+          <span class="star-count" id="star-count"></span>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero" id="hero">
+    <div class="hero-content">
+      <img src="assets/images/brosh_logo.svg" alt="brosh" class="hero-logo">
+      <p class="hero-tagline">The AI-native terminal. Built for Claude coders.</p>
+      <div class="hero-cta">
+        <a href="#download" class="btn btn-primary" id="hero-download-btn">Download</a>
+        <a href="https://github.com/elleryfamilia/brosh" target="_blank" rel="noopener" class="btn btn-secondary">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+
+    <!-- Video Player / Screenshot Showcase -->
+    <div class="showcase">
+      <div class="showcase-tabs">
+        <button class="showcase-tab active" data-tab="nlp">Natural Language</button>
+        <button class="showcase-tab" data-tab="panes">Split Panes</button>
+        <button class="showcase-tab" data-tab="git">Git Sidebar</button>
+        <button class="showcase-tab" data-tab="sandbox">Sandbox</button>
+        <button class="showcase-tab" data-tab="mcp">MCP</button>
+        <button class="showcase-tab" data-tab="recording">Recording</button>
+      </div>
+      <div class="showcase-window">
+        <div class="window-frame">
+          <div class="window-titlebar">
+            <span class="window-dot red"></span>
+            <span class="window-dot yellow"></span>
+            <span class="window-dot green"></span>
+          </div>
+          <div class="window-content">
+            <div class="showcase-panel active" data-panel="nlp">
+              <video class="showcase-video" data-src="assets/videos/nlp.mp4" muted loop playsinline></video>
+              <img class="showcase-img" src="assets/images/terminal_chat.png" alt="Natural language detection in brosh">
+            </div>
+            <div class="showcase-panel" data-panel="panes">
+              <video class="showcase-video" data-src="assets/videos/panes.mp4" muted loop playsinline></video>
+              <img class="showcase-img" src="assets/images/brosh_startscreen.png" alt="Split panes and tabs">
+            </div>
+            <div class="showcase-panel" data-panel="git">
+              <video class="showcase-video" data-src="assets/videos/git.mp4" muted loop playsinline></video>
+              <img class="showcase-img" src="assets/images/git_sidebar.png" alt="Git sidebar and diff view">
+            </div>
+            <div class="showcase-panel" data-panel="sandbox">
+              <video class="showcase-video" data-src="assets/videos/sandbox.mp4" muted loop playsinline></video>
+              <img class="showcase-img" src="assets/images/sandbox_selection2.png" alt="Sandbox mode">
+            </div>
+            <div class="showcase-panel" data-panel="mcp">
+              <video class="showcase-video" data-src="assets/videos/mcp.mp4" muted loop playsinline></video>
+              <img class="showcase-img" src="assets/images/mcp-enabled2.png" alt="MCP integration">
+            </div>
+            <div class="showcase-panel" data-panel="recording">
+              <video class="showcase-video" data-src="assets/videos/recording.mp4" muted loop playsinline></video>
+              <img class="showcase-img" src="assets/images/brosh_startscreen.png" alt="Session recording">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section class="features" id="features">
+    <!-- AI-Native -->
+    <div class="feature-row reveal">
+      <div class="feature-text">
+        <h2>AI-Native</h2>
+        <p>brosh detects natural language input and routes it to your AI model — no prefix needed. Zero-config MCP server connects Claude Code to your terminal automatically. Switch between models, continue conversations in Claude, and let AI work alongside your shell.</p>
+        <ul class="feature-list">
+          <li>Natural language detection with ML classifier</li>
+          <li>Zero-config MCP server for Claude Code</li>
+          <li>Model switching and "Continue in Claude"</li>
+          <li>AI-aware terminal context</li>
+        </ul>
+      </div>
+      <div class="feature-media">
+        <div class="window-frame">
+          <div class="window-titlebar">
+            <span class="window-dot red"></span>
+            <span class="window-dot yellow"></span>
+            <span class="window-dot green"></span>
+          </div>
+          <div class="window-content">
+            <img src="assets/images/terminal_chat.png" alt="AI-native terminal chat" loading="lazy">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Developer Tools -->
+    <div class="feature-row reverse reveal">
+      <div class="feature-text">
+        <h2>Developer Tools</h2>
+        <p>Built-in Git sidebar shows your repository status, branch graph, and staged changes at a glance. Monaco-powered diff viewer lets you review changes without leaving the terminal. Record and replay terminal sessions for debugging or sharing.</p>
+        <ul class="feature-list">
+          <li>Git sidebar with branch graph</li>
+          <li>Monaco diff editor</li>
+          <li>Session recording and playback</li>
+          <li>Smart status bar</li>
+        </ul>
+      </div>
+      <div class="feature-media">
+        <div class="window-frame">
+          <div class="window-titlebar">
+            <span class="window-dot red"></span>
+            <span class="window-dot yellow"></span>
+            <span class="window-dot green"></span>
+          </div>
+          <div class="window-content">
+            <img src="assets/images/git_sidebar.png" alt="Git sidebar and diff view" loading="lazy">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Customizable -->
+    <div class="feature-row reveal">
+      <div class="feature-text">
+        <h2>Customizable</h2>
+        <p>Choose from 9 built-in themes and 25+ developer fonts. Split your workspace into panes and tabs. Adjust opacity, font size, and cursor style. Make the terminal yours.</p>
+        <ul class="feature-list">
+          <li>9 themes including dark and light</li>
+          <li>25+ curated developer fonts</li>
+          <li>Split panes and tabbed sessions</li>
+          <li>Adjustable opacity and styling</li>
+        </ul>
+      </div>
+      <div class="feature-media">
+        <div class="window-frame">
+          <div class="window-titlebar">
+            <span class="window-dot red"></span>
+            <span class="window-dot yellow"></span>
+            <span class="window-dot green"></span>
+          </div>
+          <div class="window-content">
+            <img src="assets/images/brosh_startscreen.png" alt="brosh customization" loading="lazy">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Secure -->
+    <div class="feature-row reverse reveal">
+      <div class="feature-text">
+        <h2>Secure</h2>
+        <p>Sandbox mode restricts AI agent access to only the directories you allow. On macOS, brosh uses Seatbelt profiles; on Linux, bubblewrap. Per-path permissions give you full control over what AI can read and write.</p>
+        <ul class="feature-list">
+          <li>Sandbox mode for AI agents</li>
+          <li>Per-path permission controls</li>
+          <li>macOS Seatbelt integration</li>
+          <li>Linux bubblewrap support</li>
+        </ul>
+      </div>
+      <div class="feature-media">
+        <div class="window-frame">
+          <div class="window-titlebar">
+            <span class="window-dot red"></span>
+            <span class="window-dot yellow"></span>
+            <span class="window-dot green"></span>
+          </div>
+          <div class="window-content">
+            <img src="assets/images/sandbox_selection2.png" alt="Sandbox mode configuration" loading="lazy">
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- MCP Setup -->
+  <section class="mcp-setup" id="mcp-setup">
+    <div class="mcp-setup-inner reveal">
+      <h2>MCP Integration</h2>
+      <p>Add to your Claude Code MCP settings and start working.</p>
+      <div class="terminal-block">
+        <div class="terminal-titlebar">
+          <span class="window-dot red"></span>
+          <span class="window-dot yellow"></span>
+          <span class="window-dot green"></span>
+          <span class="terminal-title">~/.claude/settings.json</span>
+        </div>
+        <pre class="terminal-code"><code>{
+  "mcpServers": {
+    "brosh": {
+      "command": "npx",
+      "args": ["-y", "brosh"]
+    }
+  }
+}</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- Download -->
+  <section class="download" id="download">
+    <div class="download-inner reveal">
+      <h2>Download brosh</h2>
+      <p class="download-version" id="download-version"></p>
+
+      <!-- Primary download -->
+      <div class="download-primary" id="download-primary">
+        <!-- Populated by JS based on detected OS -->
+      </div>
+
+      <!-- Alternative installs -->
+      <div class="download-alternatives">
+        <h3>Other install methods</h3>
+        <div class="install-grid">
+          <div class="install-card">
+            <h4>Homebrew</h4>
+            <div class="code-inline">
+              <code>brew install --cask brosh</code>
+            </div>
+          </div>
+          <div class="install-card">
+            <h4>npm</h4>
+            <div class="code-inline">
+              <code>npm install -g brosh</code>
+            </div>
+          </div>
+          <div class="install-card">
+            <h4>Linux (Ubuntu/Debian)</h4>
+            <div class="code-inline">
+              <code>curl -fsSL https://bro.sh/install.sh | sudo bash</code>
+            </div>
+          </div>
+          <div class="install-card">
+            <h4>AUR (Arch Linux)</h4>
+            <div class="code-inline">
+              <code>yay -S brosh-desktop-bin</code>
+            </div>
+          </div>
+        </div>
+
+        <div class="download-direct">
+          <h3>Direct downloads</h3>
+          <div class="direct-links" id="direct-links">
+            <!-- Populated by JS -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <img src="assets/images/brosh_logo.svg" alt="brosh" height="24">
+        <span class="footer-license">MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/elleryfamilia/brosh" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://www.npmjs.com/package/brosh" target="_blank" rel="noopener">npm</a>
+        <a href="https://github.com/elleryfamilia/brosh/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/elleryfamilia/brosh#readme" target="_blank" rel="noopener">Docs</a>
+      </div>
+    </div>
+  </footer>
+
+  <script src="js/main.js"></script>
+</body>
+</html>

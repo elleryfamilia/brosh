@@ -1,0 +1,58 @@
+name: Deploy website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - 'docs/images/**'
+      - 'brosh_logo.svg'
+      - 'brosh_brandmark.svg'
+  workflow_dispatch:
+
+permissions:
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build site
+        run: |
+          cp -r website _site
+
+          # Copy images from docs/images/
+          mkdir -p _site/assets/images
+          cp docs/images/*.png _site/assets/images/ 2>/dev/null || true
+
+          # Copy logo SVGs
+          cp brosh_logo.svg _site/assets/images/ 2>/dev/null || true
+          cp brosh_brandmark.svg _site/assets/images/ 2>/dev/null || true
+
+          # Copy icon PNGs
+          cp packages/desktop-electron/resources/icons/png/16x16.png _site/assets/images/ 2>/dev/null || true
+          cp packages/desktop-electron/resources/icons/png/32x32.png _site/assets/images/ 2>/dev/null || true
+          cp packages/desktop-electron/resources/icons/png/256x256.png _site/assets/images/ 2>/dev/null || true
+          cp packages/desktop-electron/resources/icons/png/512x512.png _site/assets/images/ 2>/dev/null || true
+
+          # Copy root logo
+          cp logo.png _site/assets/images/ 2>/dev/null || true
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
