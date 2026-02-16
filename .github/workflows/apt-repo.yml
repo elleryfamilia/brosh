@@ -1,0 +1,124 @@
+name: Update apt repository
+
+on:
+  workflow_run:
+    workflows: ["Publish to npm & Build Desktop"]
+    types: [completed]
+
+jobs:
+  update-apt-repo:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+      pages: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          fetch-depth: 0
+        continue-on-error: true
+
+      - name: Initialize gh-pages branch if needed
+        run: |
+          if [ ! -f index.html ]; then
+            git checkout --orphan gh-pages || true
+            git rm -rf . 2>/dev/null || true
+          fi
+
+      - name: Install apt tools
+        run: sudo apt-get update && sudo apt-get install -y dpkg-dev gpg
+
+      - name: Import GPG key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+
+      - name: Get release tag
+        id: tag
+        env:
+          RUN_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: echo "version=$RUN_HEAD_BRANCH" >> "$GITHUB_OUTPUT"
+
+      - name: Download .deb files from release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          mkdir -p pool/main/b/brosh
+          gh release download "$VERSION" \
+            --repo elleryfamilia/brosh \
+            --pattern '*.deb' \
+            --dir pool/main/b/brosh \
+            --clobber
+
+      - name: Generate Packages indices
+        run: |
+          for arch in amd64 arm64; do
+            mkdir -p dists/stable/main/binary-$arch
+            dpkg-scanpackages --arch $arch pool/ > dists/stable/main/binary-$arch/Packages
+            gzip -9c dists/stable/main/binary-$arch/Packages > dists/stable/main/binary-$arch/Packages.gz
+          done
+
+      - name: Generate Release file
+        run: |
+          cd dists/stable
+          cat > Release << 'RELEASE_EOF'
+          Origin: brosh
+          Label: brosh
+          Suite: stable
+          Codename: stable
+          Architectures: amd64 arm64
+          Components: main
+          Description: brosh - AI-native terminal
+          RELEASE_EOF
+          sed -i 's/^          //' Release
+          {
+            echo "MD5Sum:"
+            find main/ -name 'Packages*' -exec sh -c 'echo " $(md5sum "$1" | cut -d" " -f1) $(wc -c < "$1") $1"' _ {} \;
+            echo "SHA256:"
+            find main/ -name 'Packages*' -exec sh -c 'echo " $(sha256sum "$1" | cut -d" " -f1) $(wc -c < "$1") $1"' _ {} \;
+          } >> Release
+
+      - name: Sign Release file
+        run: |
+          cd dists/stable
+          gpg --batch --yes --armor --detach-sign -o Release.gpg Release
+          gpg --batch --yes --armor --clearsign -o InRelease Release
+
+      - name: Export public key
+        run: gpg --armor --export > gpg.key
+
+      - name: Create index page
+        run: |
+          cat > index.html << 'HTML_EOF'
+          <!DOCTYPE html>
+          <html>
+          <head><title>brosh apt repository</title></head>
+          <body>
+          <h1>brosh apt repository</h1>
+          <pre>
+          # Add GPG key
+          curl -fsSL https://elleryfamilia.github.io/brosh/gpg.key | sudo gpg --dearmor -o /usr/share/keyrings/brosh.gpg
+
+          # Add repository
+          echo "deb [arch=amd64,arm64 signed-by=/usr/share/keyrings/brosh.gpg] https://elleryfamilia.github.io/brosh stable main" | sudo tee /etc/apt/sources.list.d/brosh.list
+
+          # Install
+          sudo apt update && sudo apt install brosh
+          </pre>
+          </body>
+          </html>
+          HTML_EOF
+
+      - name: Commit and push
+        env:
+          RELEASE_VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Update apt repo for $RELEASE_VERSION" || echo "No changes"
+          git push origin gh-pages

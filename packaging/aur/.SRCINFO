@@ -1,0 +1,20 @@
+pkgbase = brosh-bin
+	pkgdesc = AI-native terminal built for Claude coders
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/elleryfamilia/brosh
+	arch = x86_64
+	arch = aarch64
+	license = MIT
+	depends = gtk3
+	depends = nss
+	depends = libxss
+	depends = alsa-lib
+	provides = brosh
+	conflicts = brosh
+	source_x86_64 = https://github.com/elleryfamilia/brosh/releases/download/v0.1.0/brosh_0.1.0_amd64.deb
+	source_aarch64 = https://github.com/elleryfamilia/brosh/releases/download/v0.1.0/brosh_0.1.0_arm64.deb
+	sha256sums_x86_64 = SKIP
+	sha256sums_aarch64 = SKIP
+
+pkgname = brosh-bin

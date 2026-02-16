@@ -166,7 +166,7 @@
     "linux": {
       "icon": "resources/icons/png",
       "category": "Development",
-      "target": ["AppImage"]
+      "target": ["deb"]
     }
   }
 }

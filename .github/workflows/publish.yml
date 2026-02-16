@@ -58,7 +58,10 @@ jobs:
             args: --mac --arm64
           - os: ubuntu-latest
             arch: x64
-            args: --linux
+            args: --linux --x64
+          - os: ubuntu-latest
+            arch: arm64
+            args: --linux --arm64
 
     runs-on: ${{ matrix.os }}
 
@@ -88,6 +91,10 @@ jobs:
       - name: Install sandbox build deps
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y meson ninja-build pkg-config libcap-dev
+
+      - name: Install cross-compilation tools
+        if: runner.os == 'Linux' && matrix.arch == 'arm64'
+        run: sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
 
       - name: Build and bundle sandbox binaries
         if: runner.os == 'Linux'
