@@ -173,9 +173,15 @@ ul { list-style: none; }
   margin: 0 auto;
 }
 
-.hero-logo {
-  height: 80px;
-  margin: 0 auto 24px;
+.hero-headline {
+  font-size: 7rem;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  margin-bottom: 24px;
+  max-width: 1000px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .hero-tagline {
@@ -614,7 +620,7 @@ ul { list-style: none; }
     margin-bottom: 80px;
   }
 
-  .hero-logo { height: 60px; }
+  .hero-headline { font-size: 5.25rem; }
   .hero-tagline { font-size: 1.25rem; }
 }
 
@@ -650,7 +656,7 @@ ul { list-style: none; }
     padding-top: calc(var(--nav-height) + 40px);
     padding-bottom: 60px;
   }
-  .hero-logo { height: 48px; }
+  .hero-headline { font-size: 3.85rem; }
   .hero-tagline { font-size: 1.1rem; }
   .hero-cta { margin-bottom: 48px; }
 
