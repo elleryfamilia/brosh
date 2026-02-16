@@ -1,0 +1,272 @@
+/**
+ * Settings Store
+ *
+ * Main process settings persistence using electron-store.
+ * Exposes IPC handlers for the renderer to read/write settings.
+ */
+
+import { ipcMain, BrowserWindow } from 'electron';
+import Store from 'electron-store';
+
+/**
+ * Theme identifier
+ */
+type ThemeId =
+  | 'default-dark'
+  | 'catppuccin-mocha'
+  | 'catppuccin-latte'
+  | 'dracula'
+  | 'nord'
+  | 'one-dark'
+  | 'solarized-dark'
+  | 'solarized-light'
+  | 'aranaverse';
+
+/**
+ * Cursor style options
+ */
+type CursorStyle = 'block' | 'bar' | 'underline';
+
+/**
+ * Claude model options
+ */
+type ClaudeModel = 'haiku' | 'sonnet' | 'opus';
+
+/**
+ * Font family options (monospace fonts suitable for terminals)
+ */
+type FontFamily =
+  | 'JetBrainsMono Nerd Font'
+  | 'Menlo'
+  | 'Monaco'
+  | 'SF Mono'
+  | 'Consolas'
+  | 'Cascadia Code'
+  | 'Fira Code'
+  | 'Source Code Pro'
+  | 'Ubuntu Mono'
+  | 'DejaVu Sans Mono';
+
+/**
+ * Application settings schema
+ */
+interface AppSettings {
+  appearance: {
+    theme: ThemeId;
+    fontFamily: FontFamily;
+    fontSize: number;
+    fontLigatures: boolean;
+  };
+  terminal: {
+    cursorStyle: CursorStyle;
+    cursorBlink: boolean;
+    scrollbackLines: number;
+    bellSound: boolean;
+    /**
+     * Also set LC_CTYPE in addition to LANG.
+     * When false (default), only LANG is set, matching iTerm2 behavior.
+     * When true, also sets LC_CTYPE which may cause SSH locale errors
+     * on remote servers (SSH forwards LC_* via SendEnv).
+     */
+    setLocaleEnv: boolean;
+  };
+  editor: {
+    vimMode: boolean;
+    lineNumbers: boolean;
+    wordWrap: boolean;
+    minimap: boolean;
+  };
+  git: {
+    closeDiffOnDirChange: 'ask' | 'close' | 'keep';
+  };
+  ai: {
+    enabled: boolean;
+    confirmBeforeInvoking: boolean;
+    showIndicator: boolean;
+    denylist: string;
+    model: ClaudeModel;
+  };
+  advanced: {
+    gpuAcceleration: boolean;
+    windowOpacity: number;
+    debugMode: boolean;
+    autoUpdate: boolean;
+  };
+  claude: {
+    dangerouslySkipPermissions: boolean;
+    rememberChoice: boolean;
+  };
+  privacy: {
+    analyticsEnabled: boolean;
+  };
+}
+
+/**
+ * Store schema
+ */
+interface SettingsStoreSchema {
+  settings: AppSettings;
+}
+
+/**
+ * Default settings values
+ */
+const defaultSettings: AppSettings = {
+  appearance: {
+    theme: 'default-dark',
+    fontFamily: 'JetBrainsMono Nerd Font',
+    fontSize: 14,
+    fontLigatures: true,
+  },
+  terminal: {
+    cursorStyle: 'block',
+    cursorBlink: true,
+    scrollbackLines: 5000,
+    bellSound: false,
+    setLocaleEnv: false,
+  },
+  editor: {
+    vimMode: false,
+    lineNumbers: true,
+    wordWrap: false,
+    minimap: false,
+  },
+  git: {
+    closeDiffOnDirChange: 'ask',
+  },
+  ai: {
+    enabled: true,
+    confirmBeforeInvoking: false,
+    showIndicator: true,
+    denylist: '',
+    model: 'haiku',
+  },
+  advanced: {
+    gpuAcceleration: true,
+    windowOpacity: 100,
+    debugMode: false,
+    autoUpdate: true,
+  },
+  claude: {
+    dangerouslySkipPermissions: false,
+    rememberChoice: false,
+  },
+  privacy: {
+    analyticsEnabled: true, // Opt-in by default
+  },
+};
+
+/**
+ * Settings store instance
+ */
+const store = new Store<SettingsStoreSchema>({
+  name: 'settings',
+  defaults: {
+    settings: defaultSettings,
+  },
+});
+
+/**
+ * Get current settings (with deep merge of defaults)
+ *
+ * This ensures that if stored settings are partial (e.g., missing
+ * ai.enabled because it was added later), defaults fill in the gaps.
+ */
+export function getSettings(): AppSettings {
+  const stored = store.get('settings');
+  if (!stored) return defaultSettings;
+
+  return {
+    appearance: { ...defaultSettings.appearance, ...(stored.appearance || {}) },
+    terminal: { ...defaultSettings.terminal, ...(stored.terminal || {}) },
+    editor: { ...defaultSettings.editor, ...(stored.editor || {}) },
+    git: { ...defaultSettings.git, ...((stored as unknown as Record<string, Record<string, unknown>>).git || {}) },
+    ai: { ...defaultSettings.ai, ...(stored.ai || {}) },
+    advanced: { ...defaultSettings.advanced, ...(stored.advanced || {}) },
+    claude: { ...defaultSettings.claude, ...((stored as unknown as Record<string, Record<string, unknown>>).claude || {}) },
+    privacy: { ...defaultSettings.privacy, ...(stored.privacy || {}) },
+  };
+}
+
+/**
+ * Update settings (deep merge)
+ */
+export function updateSettings(updates: Partial<AppSettings>): AppSettings {
+  const current = getSettings();
+  const updated: AppSettings = {
+    appearance: {
+      ...current.appearance,
+      ...(updates.appearance || {}),
+    },
+    terminal: {
+      ...current.terminal,
+      ...(updates.terminal || {}),
+    },
+    editor: {
+      ...current.editor,
+      ...(updates.editor || {}),
+    },
+    git: {
+      ...current.git,
+      ...(updates.git || {}),
+    },
+    ai: {
+      ...current.ai,
+      ...(updates.ai || {}),
+    },
+    advanced: {
+      ...current.advanced,
+      ...(updates.advanced || {}),
+    },
+    claude: {
+      ...current.claude,
+      ...(updates.claude || {}),
+    },
+    privacy: {
+      ...current.privacy,
+      ...(updates.privacy || {}),
+    },
+  };
+  store.set('settings', updated);
+  return updated;
+}
+
+/**
+ * Reset settings to defaults
+ */
+export function resetSettings(): AppSettings {
+  store.set('settings', defaultSettings);
+  return defaultSettings;
+}
+
+/**
+ * Initialize IPC handlers for settings
+ */
+export function initSettingsHandlers(): void {
+  // Get settings
+  ipcMain.handle('settings:get', () => {
+    return getSettings();
+  });
+
+  // Update settings
+  ipcMain.handle('settings:update', (_event, updates: Partial<AppSettings>) => {
+    return updateSettings(updates);
+  });
+
+  // Reset settings
+  ipcMain.handle('settings:reset', () => {
+    return resetSettings();
+  });
+
+  // Set window opacity (0.0 to 1.0)
+  ipcMain.handle('settings:setWindowOpacity', (event, opacity: number) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (win) {
+      // Clamp opacity between 0.5 and 1.0 (matching our settings range of 50-100%)
+      const clampedOpacity = Math.max(0.5, Math.min(1.0, opacity));
+      win.setOpacity(clampedOpacity);
+      return true;
+    }
+    return false;
+  });
+}

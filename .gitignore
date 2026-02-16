@@ -1,0 +1,43 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+packages/desktop-electron/release/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Coverage
+coverage/
+
+# ML models (too large for git, download separately)
+packages/desktop-electron/models/
+
+# Held-back docs (future plans / internal engineering)
+docs/claude-hooks-integration-playbook.md
+docs/windows-support.md
+docs/ide-protocol-integration.md
+packages/desktop-electron/docs/ai-tui-snapshots.md
+packages/desktop-electron/docs/engineering-watchouts.md
+packages/desktop-electron/docs/release-packaging.md
+
+# Local dev artifacts
+packages/desktop-electron/.mcp.json
+packages/desktop-electron/mcp-wrapper.sh
+test-pty.mjs

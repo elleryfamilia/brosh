@@ -1,0 +1,122 @@
+/**
+ * Pane Types
+ *
+ * Type definitions for the split pane tree structure.
+ * Each tab contains a tree of panes where leaves are terminals
+ * and internal nodes are split containers.
+ */
+
+/**
+ * Direction of a split pane
+ * - horizontal: panes are side-by-side (first on left, second on right)
+ * - vertical: panes are stacked (first on top, second on bottom)
+ */
+export type SplitDirection = "horizontal" | "vertical";
+
+/**
+ * Sandbox configuration stored with terminal pane
+ */
+export interface PaneSandboxConfig {
+  filesystem: {
+    readWrite: string[];
+    readOnly: string[];
+    blocked: string[];
+  };
+  network: {
+    mode: 'all' | 'none' | 'allowlist';
+    allowedDomains?: string[];
+  };
+}
+
+/**
+ * A terminal pane - a leaf node in the pane tree
+ */
+export interface TerminalPane {
+  id: string;
+  type: "terminal";
+  sessionId: string;
+  processName: string; // Actual PTY process name (e.g., "zsh", "node")
+  windowTitle?: string; // Full OSC title text set by the application (optional)
+  isSandboxed: boolean; // Whether this pane runs in a sandboxed environment
+  sandboxConfig?: PaneSandboxConfig; // Sandbox settings if sandboxed
+}
+
+/**
+ * A pending pane - awaiting mode selection before creating terminal
+ */
+export interface PendingPane {
+  id: string;
+  type: "pending";
+}
+
+/**
+ * Diff source options for editor pane
+ */
+export type DiffSource = "git-head" | { commit: string } | { oldContent: string; newContent: string };
+
+/**
+ * An editor pane - displays a file with syntax highlighting and optional diff view
+ */
+export interface EditorPane {
+  id: string;
+  type: "editor";
+  filePath: string;
+  isDiff: boolean;
+  diffSource?: DiffSource;
+}
+
+/**
+ * A split pane - an internal node in the pane tree
+ */
+export interface SplitPane {
+  id: string;
+  type: "split";
+  direction: SplitDirection;
+  first: Pane; // First child (left or top)
+  second: Pane; // Second child (right or bottom)
+  splitRatio: number; // 0-1, default 0.5
+}
+
+/**
+ * A pane is either a terminal, pending, editor, or split
+ */
+export type Pane = TerminalPane | PendingPane | EditorPane | SplitPane;
+
+/**
+ * Tab state with pane tree support
+ */
+export interface TabState {
+  id: string;
+  title: string;
+  rootPane: Pane; // Tree of panes
+  focusedPaneId: string; // Which pane receives keyboard input
+  isActive: boolean;
+}
+
+/**
+ * Type guard to check if a pane is a terminal pane
+ */
+export function isTerminalPane(pane: Pane): pane is TerminalPane {
+  return pane.type === "terminal";
+}
+
+/**
+ * Type guard to check if a pane is a pending pane
+ */
+export function isPendingPane(pane: Pane): pane is PendingPane {
+  return pane.type === "pending";
+}
+
+/**
+ * Type guard to check if a pane is a split pane
+ */
+export function isSplitPane(pane: Pane): pane is SplitPane {
+  return pane.type === "split";
+}
+
+/**
+ * Type guard to check if a pane is an editor pane
+ */
+export function isEditorPane(pane: Pane): pane is EditorPane {
+  return pane.type === "editor";
+}
