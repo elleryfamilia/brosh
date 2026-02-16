@@ -1,6 +1,6 @@
 {
   "name": "brosh",
-  "version": "0.2.2",
+  "version": "0.1.0",
   "description": "A modern terminal emulator with built-in AI integration via MCP",
   "author": "Ellery Familia",
   "repository": {
