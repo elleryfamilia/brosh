@@ -3,7 +3,11 @@
   "productName": "brosh",
   "version": "0.2.2",
   "description": "Desktop GUI for brosh - A terminal emulator with MCP support",
-  "author": "Ellery Familia",
+  "author": {
+    "name": "Ellery Familia",
+    "email": "ellery@elleryfamilia.com"
+  },
+  "homepage": "https://github.com/elleryfamilia/brosh",
   "license": "MIT",
   "main": "dist/main/index.js",
   "type": "module",
