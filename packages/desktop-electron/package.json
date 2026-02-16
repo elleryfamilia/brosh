@@ -139,7 +139,8 @@
       {
         "provider": "github",
         "owner": "elleryfamilia",
-        "repo": "brosh"
+        "repo": "brosh",
+        "releaseType": "release"
       }
     ],
     "mac": {
@@ -164,7 +165,8 @@
     },
     "linux": {
       "icon": "resources/icons/png",
-      "category": "Development"
+      "category": "Development",
+      "target": ["AppImage"]
     }
   }
 }
