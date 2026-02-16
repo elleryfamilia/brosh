@@ -28,7 +28,9 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsx src/index.ts",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "prepack": "mv README.md README.github.md && cp README.npm.md README.md",
+    "postpack": "mv README.github.md README.md"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.32",

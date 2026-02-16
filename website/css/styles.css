@@ -174,7 +174,7 @@ ul { list-style: none; }
 }
 
 .hero-headline {
-  font-size: 7rem;
+  font-size: 5.5rem;
   font-weight: 800;
   line-height: 1.05;
   letter-spacing: -0.03em;
@@ -620,7 +620,7 @@ ul { list-style: none; }
     margin-bottom: 80px;
   }
 
-  .hero-headline { font-size: 5.25rem; }
+  .hero-headline { font-size: 4rem; }
   .hero-tagline { font-size: 1.25rem; }
 }
 
@@ -656,7 +656,7 @@ ul { list-style: none; }
     padding-top: calc(var(--nav-height) + 40px);
     padding-bottom: 60px;
   }
-  .hero-headline { font-size: 3.85rem; }
+  .hero-headline { font-size: 2.75rem; }
   .hero-tagline { font-size: 1.1rem; }
   .hero-cta { margin-bottom: 48px; }
 
