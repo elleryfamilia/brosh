@@ -138,18 +138,9 @@ ul { list-style: none; }
   gap: 6px;
 }
 
-.btn-nav-download {
-  background: var(--brand);
-  color: #000 !important;
-  padding: 6px 16px;
-  border-radius: 6px;
-  font-size: 0.85rem;
+.nav-download {
+  color: var(--brand) !important;
   font-weight: 600;
-  transition: background 0.2s;
-}
-.btn-nav-download:hover {
-  background: #ffe066;
-  text-decoration: none !important;
 }
 
 .nav-toggle {
