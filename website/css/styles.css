@@ -138,15 +138,19 @@ ul { list-style: none; }
   gap: 6px;
 }
 
-.star-count {
-  background: var(--surface-2);
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 0.75rem;
-  color: var(--text);
-  font-family: var(--font-mono);
+.btn-nav-download {
+  background: var(--brand);
+  color: #000 !important;
+  padding: 6px 16px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  transition: background 0.2s;
 }
-.star-count:empty { display: none; }
+.btn-nav-download:hover {
+  background: #ffe066;
+  text-decoration: none !important;
+}
 
 .nav-toggle {
   display: none;
@@ -200,7 +204,17 @@ ul { list-style: none; }
   display: flex;
   gap: 16px;
   flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.hero-other-platforms {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  display: inline-block;
   margin-bottom: 24px;
+}
+.hero-other-platforms:hover {
+  color: var(--text);
 }
 
 .hero-install {
@@ -579,7 +593,7 @@ ul { list-style: none; }
 
 .footer-brand img { height: 24px; }
 
-.footer-license {
+.footer-copyright {
   color: var(--text-secondary);
   font-size: 0.85rem;
 }

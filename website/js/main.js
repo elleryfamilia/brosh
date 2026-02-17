@@ -90,38 +90,6 @@
     });
   }
 
-  // ---- GitHub star count ----
-  function fetchStars() {
-    var cached = sessionStorage.getItem('brosh_stars');
-    if (cached) {
-      showStars(cached);
-      return;
-    }
-    fetch('https://api.github.com/repos/' + REPO)
-      .then(function (r) { return r.json(); })
-      .then(function (data) {
-        if (data.stargazers_count != null) {
-          var count = data.stargazers_count;
-          sessionStorage.setItem('brosh_stars', count);
-          showStars(count);
-        }
-      })
-      .catch(function () {});
-  }
-
-  function showStars(count) {
-    var el = document.getElementById('star-count');
-    if (el) el.textContent = formatNumber(count);
-  }
-
-  function formatNumber(n) {
-    n = Number(n);
-    if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
-    return String(n);
-  }
-
-  fetchStars();
-
   // ---- OS Detection ----
   function detectOS() {
     var ua = navigator.userAgent;
@@ -210,6 +178,7 @@
     var primaryEl = document.getElementById('download-primary');
     var directEl = document.getElementById('direct-links');
     var heroBtn = document.getElementById('hero-download-btn');
+    var navBtn = document.getElementById('nav-download-btn');
 
     if (release && versionEl) {
       versionEl.textContent = 'Latest: v' + release.version;
@@ -233,36 +202,37 @@
     // Clear existing content
     while (primaryEl.firstChild) primaryEl.removeChild(primaryEl.firstChild);
 
+    function setDownloadLink(btn, url, text) {
+      if (!btn) return;
+      btn.href = url;
+      if (text) btn.textContent = text;
+    }
+
     if (detected.os === 'macos') {
       var dmgUrl = detected.arch === 'arm64' ? (macArm || macIntel) : (macIntel || macArm);
       var chipLabel = detected.arch === 'arm64' ? 'Apple Silicon' : 'Intel';
-      if (dmgUrl) {
-        primaryEl.appendChild(createEl('a', {
-          href: dmgUrl,
-          className: 'btn btn-primary'
-        }, 'Download for Mac (' + chipLabel + ')'));
-      } else {
-        primaryEl.appendChild(createEl('a', {
-          href: 'https://github.com/' + REPO + '/releases/latest',
-          className: 'btn btn-primary'
-        }, 'Download for Mac'));
-      }
-      if (heroBtn) heroBtn.textContent = 'Download for Mac';
+      var label = 'Download for Mac' + (dmgUrl ? ' (' + chipLabel + ')' : '');
+      var url = dmgUrl || 'https://github.com/' + REPO + '/releases/latest';
+      primaryEl.appendChild(createEl('a', {
+        href: url,
+        className: 'btn btn-primary'
+      }, label));
+      setDownloadLink(heroBtn, url, 'Download for Mac');
+      setDownloadLink(navBtn, url, 'Download for Mac');
     } else if (detected.os === 'linux') {
       primaryEl.appendChild(createEl('div', {
         className: 'download-command'
       }, 'curl -fsSL https://bro.sh/install.sh | sudo bash'));
-      if (heroBtn) heroBtn.textContent = 'Install on Linux';
-    } else if (detected.os === 'windows') {
-      primaryEl.appendChild(createEl('div', {
-        className: 'download-command'
-      }, 'npm install -g brosh'));
-      if (heroBtn) heroBtn.textContent = 'Install via npm';
+      setDownloadLink(heroBtn, '#download', 'Install on Linux');
+      setDownloadLink(navBtn, '#download', 'Install on Linux');
     } else {
+      var fallbackUrl = 'https://github.com/' + REPO + '/releases/latest';
       primaryEl.appendChild(createEl('a', {
-        href: 'https://github.com/' + REPO + '/releases/latest',
+        href: fallbackUrl,
         className: 'btn btn-primary'
       }, 'Download'));
+      setDownloadLink(heroBtn, fallbackUrl);
+      setDownloadLink(navBtn, fallbackUrl);
     }
 
     // Direct download links
