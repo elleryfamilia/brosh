@@ -179,6 +179,7 @@
     var directEl = document.getElementById('direct-links');
     var heroBtn = document.getElementById('hero-download-btn');
     var navBtn = document.getElementById('nav-download-btn');
+    var heroInstall = document.getElementById('hero-install');
 
     if (release && versionEl) {
       versionEl.textContent = 'Latest: v' + release.version;
@@ -225,6 +226,7 @@
       }, 'curl -fsSL https://bro.sh/install.sh | sudo bash'));
       setDownloadLink(heroBtn, '#download', 'Install on Linux');
       setDownloadLink(navBtn, '#download', 'Install on Linux');
+      if (heroInstall) heroInstall.style.display = 'none';
     } else {
       var fallbackUrl = 'https://github.com/' + REPO + '/releases/latest';
       primaryEl.appendChild(createEl('a', {
@@ -233,6 +235,7 @@
       }, 'Download'));
       setDownloadLink(heroBtn, fallbackUrl);
       setDownloadLink(navBtn, fallbackUrl);
+      if (heroInstall) heroInstall.style.display = 'none';
     }
 
     // Direct download links
