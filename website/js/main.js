@@ -6,6 +6,17 @@
   var REPO = 'elleryfamilia/brosh';
   var RELEASE_API = 'https://api.github.com/repos/' + REPO + '/releases/latest';
 
+  // ---- Copy buttons ----
+  document.querySelectorAll('.copy-btn').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var text = this.getAttribute('data-copy');
+      navigator.clipboard.writeText(text).then(function () {
+        btn.classList.add('copied');
+        setTimeout(function () { btn.classList.remove('copied'); }, 2000);
+      });
+    });
+  });
+
   // ---- Nav scroll effect ----
   var nav = document.getElementById('nav');
   function updateNav() {
