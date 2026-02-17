@@ -238,12 +238,12 @@ ul { list-style: none; }
   align-items: center;
   background: none;
   border: none;
-  color: var(--text-secondary);
+  color: var(--text);
   cursor: pointer;
   padding: 2px;
   transition: color 0.2s;
 }
-.copy-btn:hover { color: var(--text); }
+.copy-btn:hover { color: var(--brand); }
 .copy-btn .check-icon { display: none; }
 .copy-btn.copied .copy-icon { display: none; }
 .copy-btn.copied .check-icon { display: block; color: var(--brand); }

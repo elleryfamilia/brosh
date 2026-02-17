@@ -101,6 +101,17 @@
     });
   }
 
+  // ---- Hide brew install for non-macOS immediately ----
+  (function () {
+    var ua = navigator.userAgent || '';
+    var platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || '';
+    var isMac = /macOS/i.test(platform) || /Mac/i.test(platform) || /Mac/i.test(ua);
+    if (!isMac) {
+      var el = document.getElementById('hero-install');
+      if (el) el.style.display = 'none';
+    }
+  })();
+
   // ---- OS Detection ----
   function detectOS() {
     var ua = navigator.userAgent;
