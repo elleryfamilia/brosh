@@ -1289,23 +1289,14 @@ function registerIpcHandlers(wm: WindowManager): void {
     const results: Array<{ absolutePath: string; name: string; title: string | null; mtime: string }> = [];
     const planIndexed = planStore.get("planIndexed");
 
-    // If user has never indexed this project, show ALL plans so they can see what's available.
-    // After they've indexed, only show related (TRUE) plans.
+    // Only show plans that have been classified as related to this project.
+    // Unindexed projects show nothing — user can click "Index Plans" to classify.
     if (!planIndexed[gitRoot]) {
-      // Show all plans (unclassified)
-      for (const [filename] of planIndex) {
-        if (dismissed.has(filename)) continue;
-        const entry = planIndex.get(filename);
-        if (entry) {
-          results.push({
-            absolutePath: entry.absolutePath,
-            name: entry.name,
-            title: entry.title,
-            mtime: new Date(entry.mtime).toISOString(),
-          });
-        }
-      }
-    } else if (decisions && Object.keys(decisions).length > 0) {
+      // Not yet indexed — return empty so the panel shows the "Index Plans" prompt
+      return results;
+    }
+
+    if (decisions && Object.keys(decisions).length > 0) {
       // User has indexed - only show related (true) plans
       for (const [filename, isRelated] of Object.entries(decisions)) {
         if (!isRelated || dismissed.has(filename)) continue;
