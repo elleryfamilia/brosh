@@ -1,11 +1,12 @@
 /**
  * SidebarHost — Generic sidebar container
  *
- * Renders the active plugin's Panel component with width management.
- * Handles per-plugin width persistence via localStorage.
+ * Keeps visited plugin panels mounted so switching between plugins is
+ * instant (no unmount/remount). Inactive panels are hidden with
+ * display:none and receive isActive:false so their data hooks idle.
  */
 
-import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { getPlugin } from './registry';
 import type { PluginContext, DiffSource, WorkspaceContext } from './types';
 
@@ -34,6 +35,12 @@ function getStoredWidth(pluginId: string, defaultWidth: number, minWidth: number
   return Math.max(minWidth, Math.min(maxWidth, parsed));
 }
 
+function getPluginStoredWidth(pluginId: string) {
+  const p = getPlugin(pluginId);
+  if (!p) return 0;
+  return getStoredWidth(pluginId, p.definition.defaultWidth, p.definition.minWidth, p.definition.maxWidth);
+}
+
 export function SidebarHost({
   activePluginId,
   workspace,
@@ -43,20 +50,28 @@ export function SidebarHost({
   onClose,
   onWidthChange,
 }: SidebarHostProps) {
-  const plugin = activePluginId ? getPlugin(activePluginId) : undefined;
+  // Track which plugins have been opened so we keep them mounted
+  const [visitedIds, setVisitedIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (activePluginId && !visitedIds.includes(activePluginId)) {
+      setVisitedIds((prev) => [...prev, activePluginId]);
+    }
+  }, [activePluginId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Per-plugin width state
   const [widths, setWidths] = useState<Record<string, number>>({});
 
-  const width = plugin
-    ? widths[plugin.definition.id] ??
-      getStoredWidth(plugin.definition.id, plugin.definition.defaultWidth, plugin.definition.minWidth, plugin.definition.maxWidth)
+  const activePlugin = activePluginId ? getPlugin(activePluginId) : undefined;
+  const activeWidth = activePlugin
+    ? widths[activePlugin.definition.id] ??
+      getStoredWidth(activePlugin.definition.id, activePlugin.definition.defaultWidth, activePlugin.definition.minWidth, activePlugin.definition.maxWidth)
     : 0;
 
   // Report width whenever active plugin changes or width changes
   const prevReportedRef = useRef<{ id: string | null; width: number }>({ id: null, width: 0 });
   useEffect(() => {
-    const effectiveWidth = plugin ? width : 0;
+    const effectiveWidth = activePlugin ? activeWidth : 0;
     if (
       prevReportedRef.current.id !== activePluginId ||
       prevReportedRef.current.width !== effectiveWidth
@@ -64,43 +79,72 @@ export function SidebarHost({
       prevReportedRef.current = { id: activePluginId, width: effectiveWidth };
       onWidthChange(effectiveWidth);
     }
-  }, [activePluginId, plugin, width, onWidthChange]);
+  }, [activePluginId, activePlugin, activeWidth, onWidthChange]);
 
-  // Width resize handler — delegates to panel's built-in resize handle
-  const handleResize = useCallback(
-    (newWidth: number) => {
-      if (!plugin) return;
-      const { minWidth, maxWidth, id } = plugin.definition;
-      const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
-      setWidths((prev) => ({ ...prev, [id]: clamped }));
-      localStorage.setItem(`sidebar:${id}:width`, String(clamped));
-    },
-    [plugin]
-  );
+  // Stable per-plugin resize handlers (cached in a ref)
+  const resizeHandlersRef = useRef<Record<string, (w: number) => void>>({});
+  function getResizeHandler(pluginId: string): (w: number) => void {
+    if (!resizeHandlersRef.current[pluginId]) {
+      resizeHandlersRef.current[pluginId] = (newWidth: number) => {
+        const p = getPlugin(pluginId);
+        if (!p) return;
+        const { minWidth, maxWidth, id } = p.definition;
+        const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
+        setWidths((prev) => ({ ...prev, [id]: clamped }));
+        localStorage.setItem(`sidebar:${id}:width`, String(clamped));
+      };
+    }
+    return resizeHandlersRef.current[pluginId];
+  }
 
-  // Assemble PluginContext
-  const context = useMemo<PluginContext>(
+  // Two stable context objects — one for active, one for inactive.
+  // Avoids creating new objects per panel per render.
+  const activeContext = useMemo<PluginContext>(
     () => ({
       workspace,
-      isActive: activePluginId !== null,
+      isActive: true,
       openFile: onOpenFile,
       closeEditor: onCloseEditor,
       editorFilePath,
     }),
-    [workspace, activePluginId, onOpenFile, onCloseEditor, editorFilePath]
+    [workspace, onOpenFile, onCloseEditor, editorFilePath]
   );
 
-  if (!plugin || !activePluginId) return null;
+  const inactiveContext = useMemo<PluginContext>(
+    () => ({
+      workspace,
+      isActive: false,
+      openFile: onOpenFile,
+      closeEditor: onCloseEditor,
+      editorFilePath,
+    }),
+    [workspace, onOpenFile, onCloseEditor, editorFilePath]
+  );
 
-  const Panel = plugin.Panel;
+  if (visitedIds.length === 0) return null;
 
   return (
-    <Panel
-      context={context}
-      width={width}
-      onResize={handleResize}
-      onClose={onClose}
-    />
+    <>
+      {visitedIds.map((id) => {
+        const plugin = getPlugin(id);
+        if (!plugin) return null;
+
+        const isActive = id === activePluginId;
+        const Panel = plugin.Panel;
+        const w = widths[id] ?? getPluginStoredWidth(id);
+
+        return (
+          <div key={id} style={isActive ? undefined : { display: 'none' }}>
+            <Panel
+              context={isActive ? activeContext : inactiveContext}
+              width={w}
+              onResize={getResizeHandler(id)}
+              onClose={onClose}
+            />
+          </div>
+        );
+      })}
+    </>
   );
 }
 
@@ -112,6 +156,6 @@ export function getPluginWidth(pluginId: string): number {
     pluginId,
     plugin.definition.defaultWidth,
     plugin.definition.minWidth,
-    plugin.definition.maxWidth
+    plugin.definition.maxWidth,
   );
 }

@@ -9,6 +9,7 @@ import { registerSidebarPlugin } from '../registry';
 import type { RegisteredPlugin } from '../types';
 import { PlansBadge } from './PlansBadge';
 import { PlansPanel } from './PlansPanel';
+import { PlansEditorPanel } from './PlansEditorPanel';
 import { getPlansBadgeState } from './useBadgeState';
 
 const plansPlugin: RegisteredPlugin = {
@@ -24,6 +25,7 @@ const plansPlugin: RegisteredPlugin = {
   },
   Badge: PlansBadge,
   Panel: PlansPanel,
+  EditorPanel: PlansEditorPanel,
   getBadgeState: getPlansBadgeState,
 };
 
