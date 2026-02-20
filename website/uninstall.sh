@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Placeholder — overwritten by apt-repo workflow
-echo "This placeholder should have been replaced by the CI workflow."
-echo "Visit https://github.com/elleryfamilia/brosh for instructions."
-exit 1
+set -euo pipefail
+echo "Removing brosh..."
+sudo apt remove -y brosh-desktop 2>/dev/null || sudo dpkg -r brosh-desktop 2>/dev/null || true
+echo "brosh removed."
