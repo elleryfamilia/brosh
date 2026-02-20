@@ -2,7 +2,7 @@
  * Pane Types
  *
  * Type definitions for the split pane tree structure.
- * Each tab contains a tree of panes where leaves are terminals
+ * Each window contains a tree of panes where leaves are terminals
  * and internal nodes are split containers.
  */
 
@@ -81,17 +81,6 @@ export interface SplitPane {
  * A pane is either a terminal, pending, editor, or split
  */
 export type Pane = TerminalPane | PendingPane | EditorPane | SplitPane;
-
-/**
- * Tab state with pane tree support
- */
-export interface TabState {
-  id: string;
-  title: string;
-  rootPane: Pane; // Tree of panes
-  focusedPaneId: string; // Which pane receives keyboard input
-  isActive: boolean;
-}
 
 /**
  * Type guard to check if a pane is a terminal pane

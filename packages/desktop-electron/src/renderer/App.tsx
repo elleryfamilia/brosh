@@ -1,9 +1,9 @@
 /**
  * Main Application Component
  *
- * Root component that manages the terminal layout and multi-tab state.
- * Supports split panes within each tab.
- * Shows mode selection dialog for new tabs, inline selector for split panes.
+ * Root component that manages the terminal layout with a single pane tree per window.
+ * Supports split panes. Shows mode selection dialog for new terminals,
+ * inline selector for split panes.
  */
 
 import { useEffect, useState, useCallback, useRef } from "react";
@@ -25,7 +25,7 @@ import type { TerminalMethods } from "./components/Terminal";
 import { FindBar } from "./components/FindBar";
 import { SettingsPanel, useSettings } from "./settings";
 import type { SandboxConfig } from "./types/sandbox";
-import type { TabState, SplitDirection, PaneSandboxConfig, DiffSource } from "./types/pane";
+import type { Pane, SplitDirection, PaneSandboxConfig, DiffSource } from "./types/pane";
 import {
   SidebarHost,
   useWorkspaceContext,
@@ -98,32 +98,31 @@ function calculateTerminalSize() {
 
 
 export function App() {
-  const [tabs, setTabs] = useState<TabState[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
+  const [rootPane, setRootPane] = useState<Pane | null>(null);
+  const [focusedPaneId, setFocusedPaneId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const tabCounter = useRef(0);
 
   // Welcome modal state (first-launch only)
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
   const [welcomeCheckComplete, setWelcomeCheckComplete] = useState(false);
 
-  // Mode selection modal state (for new tabs only)
+  // Mode selection modal state
   const [showModeModal, setShowModeModal] = useState(false);
 
   // Track if this is the initial terminal creation in this window (for logo display)
   // Logo only shows on first terminal of first window
   const hasCreatedFirstTerminal = useRef(false);
 
-  // Track which mode was selected for the pending tab creation
+  // Track which mode was selected for reuse on new terminals
   const pendingTabModeRef = useRef<"direct" | "sandbox">("direct");
   // Track the last sandbox config so it can be reused when skipping the modal
   const pendingTabConfigRef = useRef<SandboxConfig | undefined>(undefined);
 
   // Keep refs to current state for use in callbacks without stale closures
-  const tabsRef = useRef<TabState[]>([]);
-  tabsRef.current = tabs;
-  const activeTabIdRef = useRef<string | null>(null);
-  activeTabIdRef.current = activeTabId;
+  const rootPaneRef = useRef<Pane | null>(null);
+  rootPaneRef.current = rootPane;
+  const focusedPaneIdRef = useRef<string | null>(null);
+  focusedPaneIdRef.current = focusedPaneId;
 
   // MCP attachment state
   const [mcpAttachedSessionId, setMcpAttachedSessionId] = useState<
@@ -220,17 +219,17 @@ export function App() {
 
   // Get focused session ID from refs (for use in callbacks without stale closures)
   const getFocusedSessionId = useCallback((): string | null => {
-    const activeTab = tabsRef.current.find((t) => t.id === activeTabIdRef.current);
-    if (!activeTab) return null;
-    const pane = findPaneById(activeTab.rootPane, activeTab.focusedPaneId);
+    const rp = rootPaneRef.current;
+    const fpId = focusedPaneIdRef.current;
+    if (!rp || !fpId) return null;
+    const pane = findPaneById(rp, fpId);
     return pane && isTerminalPane(pane) ? pane.sessionId : null;
   }, []);
 
   // Compute focused session ID for dependency tracking
   const currentFocusedSessionId = (() => {
-    const tab = tabs.find((t) => t.id === activeTabId);
-    if (!tab) return null;
-    const pane = findPaneById(tab.rootPane, tab.focusedPaneId);
+    if (!rootPane || !focusedPaneId) return null;
+    const pane = findPaneById(rootPane, focusedPaneId);
     return pane && isTerminalPane(pane) ? pane.sessionId : null;
   })();
 
@@ -288,11 +287,6 @@ export function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
-  // Helper to get the active tab
-  const getActiveTab = useCallback(() => {
-    return tabsRef.current.find((t) => t.id === activeTabIdRef.current) || null;
-  }, []);
-
   // Create a new terminal session with specified mode
   const createTerminalSession = useCallback(
     async (mode: "direct" | "sandbox", config?: SandboxConfig) => {
@@ -338,87 +332,61 @@ export function App() {
     []
   );
 
-  // Create a new tab with a single terminal pane
-  const createTabWithMode = useCallback(
+  // Create the initial pane for the window
+  const createInitialPane = useCallback(
     async (mode: "direct" | "sandbox", config?: SandboxConfig) => {
       try {
         const { sessionId, processName, isSandboxed, sandboxConfig } = await createTerminalSession(
           mode,
           config
         );
-        const tabId = `tab-${++tabCounter.current}`;
         const pane = createTerminalPane(sessionId, processName, isSandboxed, sandboxConfig);
 
-        const newTab: TabState = {
-          id: tabId,
-          title: `Terminal ${tabCounter.current}`,
-          rootPane: pane,
-          focusedPaneId: pane.id,
-          isActive: true,
-        };
-
-        setTabs((prev) => [...prev, newTab]);
-        setActiveTabId(tabId);
-
-        return tabId;
+        setRootPane(pane);
+        setFocusedPaneId(pane.id);
       } catch (err) {
-        console.error("Failed to create tab:", err);
+        console.error("Failed to create terminal:", err);
         setError(
           err instanceof Error ? err.message : "Failed to create terminal"
         );
-        return null;
       }
     },
     [createTerminalSession]
   );
 
-  // Request to create a new tab (shows modal, or skips if setting is off)
-  const requestNewTab = useCallback(() => {
-    if (hasCreatedFirstTerminal.current && !settings.terminal.askModeForNewTerminals) {
-      createTabWithMode(pendingTabModeRef.current, pendingTabConfigRef.current);
-      trackTerminalCreated(pendingTabModeRef.current, false);
-      return;
-    }
-    setShowModeModal(true);
-  }, [settings.terminal.askModeForNewTerminals, createTabWithMode]);
-
-  // Handle mode selection from modal (for new tabs)
+  // Handle mode selection from modal
   const handleModeSelected = useCallback(
     async (mode: "direct" | "sandbox", config?: SandboxConfig) => {
       hasCreatedFirstTerminal.current = true;
       setShowModeModal(false);
       pendingTabModeRef.current = mode;
       pendingTabConfigRef.current = config;
-      await createTabWithMode(mode, config);
-      // Track terminal creation
+      await createInitialPane(mode, config);
       trackTerminalCreated(mode, false);
     },
-    [createTabWithMode]
+    [createInitialPane]
   );
 
   // Split the focused pane immediately with a pending pane (or skip modal if setting is off)
   const splitFocusedPane = useCallback(
     (direction: SplitDirection) => {
-      const activeTab = getActiveTab();
-      if (!activeTab) return;
+      const rp = rootPaneRef.current;
+      const fpId = focusedPaneIdRef.current;
+      if (!rp || !fpId) return;
 
       // Don't allow split if there's already a pending pane
-      if (hasPendingPanes(activeTab.rootPane)) return;
+      if (hasPendingPanes(rp)) return;
 
       // Skip the pending pane and create terminal directly if setting is off
       if (hasCreatedFirstTerminal.current && !settings.terminal.askModeForNewTerminals) {
-        const tabId = activeTab.id;
         createTerminalSession(pendingTabModeRef.current, pendingTabConfigRef.current)
           .then(({ sessionId, processName, isSandboxed, sandboxConfig }) => {
             const terminalPane = createTerminalPane(sessionId, processName, isSandboxed, sandboxConfig);
-            setTabs((prev) => {
-              const tab = prev.find((t) => t.id === tabId);
-              if (!tab) return prev;
-              const newRoot = splitPaneInTree(tab.rootPane, tab.focusedPaneId, direction, terminalPane);
-              return prev.map((t) =>
-                t.id === tabId ? { ...t, rootPane: newRoot, focusedPaneId: terminalPane.id } : t
-              );
+            setRootPane((prev) => {
+              if (!prev) return prev;
+              return splitPaneInTree(prev, focusedPaneIdRef.current!, direction, terminalPane);
             });
+            setFocusedPaneId(terminalPane.id);
             trackTerminalCreated(pendingTabModeRef.current, true);
           })
           .catch((err) => {
@@ -428,26 +396,11 @@ export function App() {
       }
 
       const pendingPane = createPendingPane();
-      const newRootPane = splitPaneInTree(
-        activeTab.rootPane,
-        activeTab.focusedPaneId,
-        direction,
-        pendingPane
-      );
-
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.id === activeTab.id
-            ? {
-                ...t,
-                rootPane: newRootPane,
-                focusedPaneId: pendingPane.id, // Focus the pending pane so modal gets focus
-              }
-            : t
-        )
-      );
+      const newRoot = splitPaneInTree(rp, fpId, direction, pendingPane);
+      setRootPane(newRoot);
+      setFocusedPaneId(pendingPane.id);
     },
-    [getActiveTab, settings.terminal.askModeForNewTerminals, createTerminalSession]
+    [settings.terminal.askModeForNewTerminals, createTerminalSession]
   );
 
   // Handle mode selection from inline pending pane
@@ -457,16 +410,14 @@ export function App() {
       mode: "direct" | "sandbox",
       config?: SandboxConfig
     ) => {
-      const activeTab = getActiveTab();
-      if (!activeTab) return;
+      const rp = rootPaneRef.current;
+      if (!rp) return;
 
       // Store mode and config so subsequent terminals can reuse them
       pendingTabModeRef.current = mode;
       pendingTabConfigRef.current = config;
 
       try {
-        // TODO: Implement proper cwd inheritance for splits
-        // For now, all new terminals start in home directory (set by backend)
         const { sessionId, processName, isSandboxed, sandboxConfig } = await createTerminalSession(
           mode,
           config
@@ -475,107 +426,35 @@ export function App() {
         // Preserve the pane ID so focus works correctly
         terminalPane.id = paneId;
 
-        const newRootPane = replacePaneInTree(
-          activeTab.rootPane,
-          paneId,
-          terminalPane
-        );
+        setRootPane((prev) => prev ? replacePaneInTree(prev, paneId, terminalPane) : prev);
+        setFocusedPaneId(paneId);
 
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.id === activeTab.id
-              ? {
-                  ...t,
-                  rootPane: newRootPane,
-                  focusedPaneId: paneId, // Focus the new terminal
-                }
-              : t
-          )
-        );
-
-        // Track terminal creation (split)
         trackTerminalCreated(mode, true);
       } catch (err) {
         console.error("Failed to create terminal in pane:", err);
-        // Remove the pending pane on error
-        const newRootPane = removePaneFromTree(activeTab.rootPane, paneId);
-        if (newRootPane) {
-          setTabs((prev) =>
-            prev.map((t) =>
-              t.id === activeTab.id ? { ...t, rootPane: newRootPane } : t
-            )
-          );
-        }
+        setRootPane((prev) => {
+          if (!prev) return prev;
+          return removePaneFromTree(prev, paneId) ?? prev;
+        });
       }
     },
-    [getActiveTab, createTerminalSession]
+    [createTerminalSession]
   );
 
   // Handle cancellation of pending pane (escape key)
   const handlePendingCancel = useCallback(
     (paneId: string) => {
-      const activeTab = getActiveTab();
-      if (!activeTab) return;
+      const rp = rootPaneRef.current;
+      if (!rp) return;
 
-      const newRootPane = removePaneFromTree(activeTab.rootPane, paneId);
-      if (newRootPane) {
-        // Find a terminal pane to focus
-        const terminalToFocus = getFirstTerminalPane(newRootPane);
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.id === activeTab.id
-              ? {
-                  ...t,
-                  rootPane: newRootPane,
-                  focusedPaneId: terminalToFocus?.id || t.focusedPaneId,
-                }
-              : t
-          )
-        );
+      const newRoot = removePaneFromTree(rp, paneId);
+      if (newRoot) {
+        const terminalToFocus = getFirstTerminalPane(newRoot);
+        setRootPane(newRoot);
+        if (terminalToFocus) setFocusedPaneId(terminalToFocus.id);
       }
     },
-    [getActiveTab]
-  );
-
-  // Remove a tab from state
-  const removeTab = useCallback((tabId: string) => {
-    setTabs((prev) => {
-      const newTabs = prev.filter((t) => t.id !== tabId);
-
-      // If no more tabs, close the window
-      if (newTabs.length === 0) {
-        window.close();
-        return newTabs;
-      }
-
-      setActiveTabId((currentActiveTabId) => {
-        if (currentActiveTabId === tabId && newTabs.length > 0) {
-          const closedIndex = prev.findIndex((t) => t.id === tabId);
-          const newActiveIndex = Math.min(closedIndex, newTabs.length - 1);
-          return newTabs[newActiveIndex].id;
-        }
-        return currentActiveTabId;
-      });
-
-      return newTabs;
-    });
-  }, []);
-
-  // Close a tab (closes all its sessions)
-  const closeTab = useCallback(
-    (tabId: string) => {
-      const tab = tabsRef.current.find((t) => t.id === tabId);
-      if (tab) {
-        const terminals = getAllTerminalPanes(tab.rootPane);
-        terminals.forEach((terminal) => {
-          window.terminalAPI
-            .closeSession(terminal.sessionId)
-            .catch(console.error);
-        });
-      }
-      removeTab(tabId);
-    },
-    [removeTab]
+    []
   );
 
   // Handle session close (from terminal exit)
@@ -594,161 +473,104 @@ export function App() {
       // If the closed session was the Claude panel session, clear it
       setClaudePanelSessionId((prev) => (prev === sessionId ? null : prev));
 
-      for (const tab of tabsRef.current) {
-        const terminals = getAllTerminalPanes(tab.rootPane);
-        const terminal = terminals.find((t) => t.sessionId === sessionId);
+      const rp = rootPaneRef.current;
+      if (!rp) return;
 
-        if (terminal) {
-          if (terminals.length === 1) {
-            removeTab(tab.id);
-          } else {
-            const newRootPane = removePaneFromTree(tab.rootPane, terminal.id);
-            if (newRootPane) {
-              setTabs((prev) =>
-                prev.map((t) =>
-                  t.id === tab.id
-                    ? {
-                        ...t,
-                        rootPane: newRootPane,
-                        focusedPaneId:
-                          t.focusedPaneId === terminal.id
-                            ? getFirstTerminalPane(newRootPane)?.id ||
-                              t.focusedPaneId
-                            : t.focusedPaneId,
-                      }
-                    : t
-                )
-              );
+      const terminals = getAllTerminalPanes(rp);
+      const terminal = terminals.find((t) => t.sessionId === sessionId);
+      if (!terminal) return;
+
+      if (terminals.length === 1) {
+        // Last terminal — close the window
+        window.close();
+      } else {
+        const newRoot = removePaneFromTree(rp, terminal.id);
+        if (newRoot) {
+          setRootPane(newRoot);
+          setFocusedPaneId((prev) => {
+            if (prev === terminal.id) {
+              return getFirstTerminalPane(newRoot)?.id ?? prev;
             }
-          }
-          break;
+            return prev;
+          });
         }
       }
     },
-    [removeTab]
+    []
   );
 
   // Close the focused pane (Cmd+W)
   const closeFocusedPane = useCallback(() => {
-    const activeTab = getActiveTab();
-    if (!activeTab) return;
+    const rp = rootPaneRef.current;
+    const fpId = focusedPaneIdRef.current;
+    if (!rp || !fpId) return;
 
-    const focusedPane = findPaneById(
-      activeTab.rootPane,
-      activeTab.focusedPaneId
-    );
+    const focusedPane = findPaneById(rp, fpId);
     if (!focusedPane) return;
 
     // Handle closing a pending pane (cancel the split)
     if (isPendingPane(focusedPane)) {
-      const newRootPane = removePaneFromTree(
-        activeTab.rootPane,
-        focusedPane.id
-      );
-      if (newRootPane) {
-        const newFocusedPane = getFirstTerminalPane(newRootPane);
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.id === activeTab.id
-              ? {
-                  ...t,
-                  rootPane: newRootPane,
-                  focusedPaneId: newFocusedPane?.id || t.focusedPaneId,
-                }
-              : t
-          )
-        );
+      const newRoot = removePaneFromTree(rp, focusedPane.id);
+      if (newRoot) {
+        const newFocused = getFirstTerminalPane(newRoot);
+        setRootPane(newRoot);
+        if (newFocused) setFocusedPaneId(newFocused.id);
       }
       return;
     }
 
     if (!isTerminalPane(focusedPane)) return;
 
-    const terminals = getAllTerminalPanes(activeTab.rootPane);
+    const terminals = getAllTerminalPanes(rp);
     if (terminals.length === 1) {
-      closeTab(activeTab.id);
+      // Last terminal — close session and window
+      window.terminalAPI.closeSession(focusedPane.sessionId).catch(console.error);
+      window.close();
     } else {
-      window.terminalAPI
-        .closeSession(focusedPane.sessionId)
-        .catch(console.error);
+      window.terminalAPI.closeSession(focusedPane.sessionId).catch(console.error);
 
-      const newRootPane = removePaneFromTree(
-        activeTab.rootPane,
-        focusedPane.id
-      );
-      if (newRootPane) {
-        const newFocusedPane = getFirstTerminalPane(newRootPane);
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.id === activeTab.id
-              ? {
-                  ...t,
-                  rootPane: newRootPane,
-                  focusedPaneId: newFocusedPane?.id || t.focusedPaneId,
-                }
-              : t
-          )
-        );
+      const newRoot = removePaneFromTree(rp, focusedPane.id);
+      if (newRoot) {
+        const newFocused = getFirstTerminalPane(newRoot);
+        setRootPane(newRoot);
+        if (newFocused) setFocusedPaneId(newFocused.id);
       }
     }
-  }, [getActiveTab, closeTab]);
+  }, []);
 
   // Navigate focus between panes (directional)
   const navigateFocus = useCallback(
     (direction: NavigationDirection) => {
-      const activeTab = getActiveTab();
-      if (!activeTab) return;
+      const rp = rootPaneRef.current;
+      const fpId = focusedPaneIdRef.current;
+      if (!rp || !fpId) return;
 
-      const adjacentPaneId = findAdjacentPane(
-        activeTab.rootPane,
-        activeTab.focusedPaneId,
-        direction
-      );
-
+      const adjacentPaneId = findAdjacentPane(rp, fpId, direction);
       if (adjacentPaneId) {
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.id === activeTab.id ? { ...t, focusedPaneId: adjacentPaneId } : t
-          )
-        );
+        setFocusedPaneId(adjacentPaneId);
       }
     },
-    [getActiveTab]
+    []
   );
 
   // Cycle focus between panes (Cmd+] / Cmd+[)
   const cycleFocus = useCallback(
     (direction: "next" | "prev") => {
-      const activeTab = getActiveTab();
-      if (!activeTab) return;
+      const rp = rootPaneRef.current;
+      const fpId = focusedPaneIdRef.current;
+      if (!rp || !fpId) return;
 
-      const nextPane = getAdjacentTerminalPane(
-        activeTab.rootPane,
-        activeTab.focusedPaneId,
-        direction
-      );
-
+      const nextPane = getAdjacentTerminalPane(rp, fpId, direction);
       if (nextPane) {
-        setTabs((prev) =>
-          prev.map((t) =>
-            t.id === activeTab.id ? { ...t, focusedPaneId: nextPane.id } : t
-          )
-        );
+        setFocusedPaneId(nextPane.id);
       }
     },
-    [getActiveTab]
+    []
   );
 
   // Set focused pane (from click)
   const setFocusedPane = useCallback((paneId: string) => {
-    const activeTabId = activeTabIdRef.current;
-    if (!activeTabId) return;
-
-    setTabs((prev) =>
-      prev.map((t) =>
-        t.id === activeTabId ? { ...t, focusedPaneId: paneId } : t
-      )
-    );
+    setFocusedPaneId(paneId);
 
     // Close find bar when terminal is clicked/focused
     if (showFindBarRef.current) {
@@ -760,27 +582,10 @@ export function App() {
   // Update split ratio
   const handleSplitRatioChange = useCallback(
     (splitPaneId: string, newRatio: number) => {
-      const activeTabId = activeTabIdRef.current;
-      if (!activeTabId) return;
-
-      setTabs((prev) =>
-        prev.map((t) =>
-          t.id === activeTabId
-            ? {
-                ...t,
-                rootPane: updateSplitRatio(t.rootPane, splitPaneId, newRatio),
-              }
-            : t
-        )
-      );
+      setRootPane((prev) => prev ? updateSplitRatio(prev, splitPaneId, newRatio) : prev);
     },
     []
   );
-
-  // Switch to a tab
-  const selectTab = useCallback((tabId: string) => {
-    setActiveTabId(tabId);
-  }, []);
 
   // Handle MCP toggle from pane header
   const handleMcpToggle = useCallback(
@@ -896,24 +701,24 @@ export function App() {
   // Handle terminal methods ready (for find bar)
   const handleTerminalMethodsReady = useCallback(
     (paneId: string, methods: TerminalMethods | null) => {
-      const activeTab = getActiveTab();
-      if (activeTab && paneId === activeTab.focusedPaneId && methods) {
+      if (paneId === focusedPaneIdRef.current && methods) {
         findBarTerminalMethodsRef.current = methods;
       }
     },
-    [getActiveTab]
+    []
   );
 
   // Handle file link click from terminal
   const handleFileLink = useCallback(
     async (filePath: string, isDiff: boolean) => {
-      const activeTab = getActiveTab();
-      if (!activeTab) return;
+      const rp = rootPaneRef.current;
+      const fpId = focusedPaneIdRef.current;
+      if (!rp || !fpId) return;
 
       // Resolve relative paths using the terminal's cwd
       let resolvedPath = filePath;
       if (!filePath.startsWith("/")) {
-        const focusedPane = findPaneById(activeTab.rootPane, activeTab.focusedPaneId);
+        const focusedPane = findPaneById(rp, fpId);
         if (focusedPane && isTerminalPane(focusedPane)) {
           try {
             const cwdResult = await window.terminalAPI.getCwd(focusedPane.sessionId);
@@ -934,7 +739,7 @@ export function App() {
       setActiveSidebarPlugin('git');
       setEditorFile({ filePath: resolvedPath, isDiff, diffSource: "git-head" });
     },
-    [getActiveTab]
+    []
   );
 
   // Handle editor file open (from sidebar plugins)
@@ -966,8 +771,7 @@ export function App() {
 
   // Build context menu groups
   const buildContextMenuGroups = useCallback((): ContextMenuGroup[] => {
-    const activeTab = getActiveTab();
-    const hasMultiplePanes = activeTab && !isTerminalPane(activeTab.rootPane);
+    const hasMultiplePanes = rootPane && !isTerminalPane(rootPane);
     const hasMcp = contextMenu.sessionId === mcpAttachedSessionId;
     const hasSelection = contextMenu.terminalMethods?.hasSelection() ?? false;
 
@@ -1041,16 +845,10 @@ export function App() {
           },
         ],
       },
-      // Tab/Window group
+      // Window group
       {
-        id: "tabWindow",
+        id: "window",
         items: [
-          {
-            id: "newTab",
-            label: "New Tab",
-            shortcut: isMac ? "\u2318T" : "Ctrl+T",
-            onClick: () => requestNewTab(),
-          },
           {
             id: "newWindow",
             label: "New Window",
@@ -1078,13 +876,12 @@ export function App() {
       },
     ];
   }, [
-    getActiveTab,
+    rootPane,
     contextMenu.sessionId,
     contextMenu.terminalMethods,
     mcpAttachedSessionId,
     splitFocusedPane,
     closeFocusedPane,
-    requestNewTab,
     createNewWindow,
     handleMcpToggle,
     addToast,
@@ -1128,13 +925,6 @@ export function App() {
         // Call the test function exposed by CrashReporterProvider
         const testFn = (window as unknown as { __testCrashReporter?: () => void }).__testCrashReporter;
         if (testFn) testFn();
-        return;
-      }
-
-      // Cmd+T - New tab
-      if (isMod && e.key === "t") {
-        e.preventDefault();
-        requestNewTab();
         return;
       }
 
@@ -1189,15 +979,6 @@ export function App() {
         return;
       }
 
-      // Cmd+1-9 - Switch tabs
-      if (isMod && e.key >= "1" && e.key <= "9") {
-        e.preventDefault();
-        const index = parseInt(e.key) - 1;
-        const currentTabs = tabsRef.current;
-        if (index < currentTabs.length) {
-          setActiveTabId(currentTabs[index].id);
-        }
-      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -1206,7 +987,6 @@ export function App() {
     showModeModal,
     showFindBar,
     closeFindBar,
-    requestNewTab,
     closeFocusedPane,
     splitFocusedPane,
     navigateFocus,
@@ -1403,9 +1183,19 @@ export function App() {
       setFocusedCwd(null);
       return;
     }
-    window.terminalAPI.getCwd(currentFocusedSessionId).then((result) => {
-      if (result.success && result.cwd) setFocusedCwd(result.cwd);
-    });
+    let cancelled = false;
+    const fetchCwd = (retries: number) => {
+      window.terminalAPI.getCwd(currentFocusedSessionId).then((result) => {
+        if (cancelled) return;
+        if (result.success && result.cwd) {
+          setFocusedCwd(result.cwd);
+        } else if (retries > 0) {
+          setTimeout(() => fetchCwd(retries - 1), 300);
+        }
+      });
+    };
+    fetchCwd(3);
+    return () => { cancelled = true; };
   }, [currentFocusedSessionId]);
 
   // Close/keep/ask about the diff panel when the project root changes
@@ -1453,15 +1243,8 @@ export function App() {
         const sid = msg.sessionId as string;
 
         // Update pane tree with new process name
-        setTabs((prev) =>
-          prev.map((tab) => ({
-            ...tab,
-            rootPane: updateTerminalProcessName(
-              tab.rootPane,
-              sid,
-              newProcess
-            ),
-          }))
+        setRootPane((prev) =>
+          prev ? updateTerminalProcessName(prev, sid, newProcess) : prev
         );
 
         // AI TUI detection: detect shell↔claude transitions
@@ -1497,15 +1280,8 @@ export function App() {
         title?: string;
       };
       if (msg.type === "title-changed" && msg.sessionId) {
-        setTabs((prev) =>
-          prev.map((tab) => ({
-            ...tab,
-            rootPane: updateWindowTitle(
-              tab.rootPane,
-              msg.sessionId as string,
-              msg.title
-            ),
-          }))
+        setRootPane((prev) =>
+          prev ? updateWindowTitle(prev, msg.sessionId as string, msg.title) : prev
         );
       }
     });
@@ -1600,27 +1376,20 @@ export function App() {
     }
   }, [editorFile?.filePath]);
 
-  // Get active tab
-  const activeTab = tabs.find((t) => t.id === activeTabId);
-
-  // For title bar, extract tab info with process name from focused pane
-  const titleBarTabs = tabs.map((tab) => {
-    const focusedPaneInTab = findPaneById(tab.rootPane, tab.focusedPaneId);
+  // Build pane info for title bar
+  const titleBarPaneInfo = (() => {
+    if (!rootPane || !focusedPaneId) return null;
+    const focusedPane = findPaneById(rootPane, focusedPaneId);
     const terminalPane =
-      focusedPaneInTab && isTerminalPane(focusedPaneInTab)
-        ? focusedPaneInTab
-        : getFirstTerminalPane(tab.rootPane);
-    // Tab has multiple panes if rootPane is not a terminal pane (i.e., it's a split)
-    const hasMultiplePanes = !isTerminalPane(tab.rootPane);
-    // Check if ANY pane in this tab has MCP attached
-    const allPanes = getAllTerminalPanes(tab.rootPane);
+      focusedPane && isTerminalPane(focusedPane)
+        ? focusedPane
+        : getFirstTerminalPane(rootPane);
+    const hasMultiplePanes = !isTerminalPane(rootPane);
+    const allPanes = getAllTerminalPanes(rootPane);
     const hasMcpSession = mcpAttachedSessionId !== null &&
       allPanes.some((p) => p.sessionId === mcpAttachedSessionId);
-    // Check if the FOCUSED pane has MCP attached
     const focusedPaneHasMcp = terminalPane?.sessionId === mcpAttachedSessionId;
     return {
-      id: tab.id,
-      title: tab.title,
       sessionId: terminalPane?.sessionId || "",
       processName: terminalPane?.processName || "shell",
       windowTitle: terminalPane?.windowTitle,
@@ -1630,10 +1399,10 @@ export function App() {
       hasMcpSession,
       focusedPaneHasMcp,
     };
-  });
+  })();
 
-  // Check if we have exactly one terminal (one tab with a single terminal pane, not split)
-  const isSingleTerminal = tabs.length === 1 && activeTab && isTerminalPane(activeTab.rootPane);
+  // Check if we have exactly one terminal (single pane, not split)
+  const isSingleTerminal = rootPane && isTerminalPane(rootPane);
 
   // Project name for Claude button (basename of CWD, null when in home/root directory)
   const claudeProjectName = (() => {
@@ -1646,17 +1415,11 @@ export function App() {
   // Whether the focused terminal is inside a git project
   const claudeProjectIsGit = !!(projectRoot && focusedCwd?.startsWith(projectRoot));
 
-  // Find which tab has the MCP-attached session
-  const mcpTab = tabs.find((tab) => {
-    const terminals = getAllTerminalPanes(tab.rootPane);
-    return terminals.some((t) => t.sessionId === mcpAttachedSessionId);
-  });
-
   // Alias for status bar and Claude panel props
   const focusedSessionId = currentFocusedSessionId;
 
-  // Render error state (only if no tabs and no modal)
-  if (error && tabs.length === 0 && !showModeModal) {
+  // Render error state (only if no pane and no modal)
+  if (error && !rootPane && !showModeModal) {
     return (
       <div className="app app-error">
         <div className="error-icon">!</div>
@@ -1665,7 +1428,7 @@ export function App() {
         <button
           onClick={() => {
             setError(null);
-            requestNewTab();
+            setShowModeModal(true);
           }}
         >
           Retry
@@ -1679,13 +1442,9 @@ export function App() {
     <div className="app">
       {isMac && (
         <TitleBar
-          tabs={titleBarTabs}
-          activeTabId={activeTabId}
+          paneInfo={titleBarPaneInfo}
           mcpAttachedSessionId={mcpAttachedSessionId}
           isSingleTerminal={!!isSingleTerminal}
-          onTabSelect={selectTab}
-          onTabClose={closeTab}
-          onNewTab={requestNewTab}
           onOpenSettings={openSettings}
           onMcpToggle={handleMcpToggle}
           onSandboxClick={handleSandboxClick}
@@ -1705,7 +1464,7 @@ export function App() {
           onClose={() => { if (activeSidebarPlugin) togglePlugin(activeSidebarPlugin); }}
           onWidthChange={setSidebarWidth}
         />
-        {showFindBar && activeTabId && (
+        {showFindBar && rootPane && (
           <FindBar
             isOpen={showFindBar}
             onClose={closeFindBar}
@@ -1784,14 +1543,13 @@ export function App() {
             </div>
           );
         })()}
-        {tabs.map((tab) => {
+        {rootPane && focusedPaneId ? (() => {
           const editorActive = !!(activeSidebarPlugin && editorFile);
           const hideTerminals = editorActive && showClaudePanel;
 
           return (
           <div
-            key={tab.id}
-            className={`terminal-wrapper ${hideTerminals ? "hidden" : (tab.id === activeTabId ? "visible" : "hidden")}`}
+            className={`terminal-wrapper ${hideTerminals ? "hidden" : "visible"}`}
             style={{
               left: editorActive && !showClaudePanel
                 ? `calc(${sidebarWidth}px + (100% - ${sidebarWidth}px) / 2)`
@@ -1800,12 +1558,12 @@ export function App() {
             }}
           >
             <PaneContainer
-              pane={tab.rootPane}
-              focusedPaneId={tab.focusedPaneId}
-              isTabVisible={tab.id === activeTabId}
+              pane={rootPane}
+              focusedPaneId={focusedPaneId}
+              isTabVisible={true}
               mcpAttachedSessionId={mcpAttachedSessionId}
-              isSinglePane={isTerminalPane(tab.rootPane)}
-              hideHeader={!!isSingleTerminal && tab.id === activeTabId && isMac}
+              isSinglePane={isTerminalPane(rootPane)}
+              hideHeader={!!isSingleTerminal && isMac}
               onOpenSettings={!isMac ? openSettings : undefined}
               onFocus={setFocusedPane}
               onSessionClose={handleSessionClose}
@@ -1827,11 +1585,11 @@ export function App() {
             />
           </div>
           );
-        })}
-        {tabs.length === 0 && !showModeModal && !showWelcomeModal && welcomeCheckComplete && (
+        })() : null}
+        {!rootPane && !showModeModal && !showWelcomeModal && welcomeCheckComplete && (
           <div className="no-tabs">
             <p>No terminals open</p>
-            <button onClick={requestNewTab}>New Terminal</button>
+            <button onClick={() => setShowModeModal(true)}>New Terminal</button>
           </div>
         )}
         {(showClaudePanel || claudePanelSessionId) && (

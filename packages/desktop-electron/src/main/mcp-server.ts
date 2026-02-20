@@ -552,7 +552,7 @@ export class McpServer {
 
     // All other methods (type, sendKey, getContent, takeScreenshot) require an attached session
     if (!this.attachedSessionId) {
-      return { id, error: { message: "No terminal attached. Enable MCP on a terminal tab first." } };
+      return { id, error: { message: "No terminal attached. Enable MCP on a terminal first." } };
     }
 
     // Look up the session across all windows

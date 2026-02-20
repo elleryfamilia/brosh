@@ -68,11 +68,6 @@ export function createMenu(windowManager: WindowManager): void {
       label: "File",
       submenu: [
         {
-          label: "New Tab",
-          accelerator: "CmdOrCtrl+T",
-          click: () => sendToActive("menu:newTerminal"),
-        },
-        {
           label: "New Window",
           accelerator: "CmdOrCtrl+N",
           click: () => {
@@ -81,7 +76,7 @@ export function createMenu(windowManager: WindowManager): void {
         },
         { type: "separator" },
         {
-          label: "Close Tab",
+          label: "Close Pane",
           accelerator: "CmdOrCtrl+W",
           click: () => sendToActive("menu:closeTerminal"),
         },
