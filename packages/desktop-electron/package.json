@@ -1,7 +1,7 @@
 {
   "name": "brosh-desktop",
   "productName": "brosh",
-  "version": "0.2.2",
+  "version": "0.1.1",
   "description": "Desktop GUI for brosh - A terminal emulator with MCP support",
   "author": {
     "name": "Ellery Familia",
@@ -159,6 +159,11 @@
           "target": "zip"
         }
       ],
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.inherit.plist",
+      "notarize": true,
       "extendInfo": {
         "NSSupportsAutomaticTermination": false,
         "NSSupportsSuddenTermination": false
