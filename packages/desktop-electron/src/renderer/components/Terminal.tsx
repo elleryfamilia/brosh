@@ -125,6 +125,10 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
   const clipboardAddonRef = useRef<ClipboardAddon | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const resizeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Scroll state captured at the START of a resize debounce series, before
+  // the browser/xterm renderer has a chance to corrupt the viewport position
+  // during the 100ms debounce wait.
+  const preResizeScrollRef = useRef<{ scrollPos: number; baseY: number; wasAtBottom: boolean } | null>(null);
 
   // Selection state for keyboard selection (Shift+Arrow)
   const selectionStateRef = useRef<{
@@ -138,6 +142,11 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
   // Scroll state for auto-hiding scrollbar
   const [isScrolling, setIsScrolling] = useState(false);
   const scrollTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Scroll-lock flag: true when user has scrolled up from the bottom.
+  // While set, fit()/reflow operations preserve the viewport position
+  // instead of letting xterm.js snap it to 0 (top) or baseY (bottom).
+  const userScrolledBackRef = useRef(false);
 
   // Autocomplete suggestion state (full suggestion + position for tooltip)
   const [autocompleteSuggestion, setAutocompleteSuggestion] = useState<{
@@ -180,9 +189,24 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
   // Build xterm theme from current theme
   const xtermTheme = useMemo(() => buildXtermTheme(theme), [theme]);
 
-  // Handle terminal output from backend
+  // Handle terminal output from backend.
+  // When the user has scrolled back, pin the viewport so incoming output
+  // doesn't yank it away (mirrors iTerm2 / Kitty behaviour).
   const handleOutput = useCallback((data: string) => {
-    if (xtermRef.current) {
+    if (!xtermRef.current) return;
+
+    if (userScrolledBackRef.current && !isInAlternateBufferRef.current) {
+      const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
+      const scrollTop = viewport?.scrollTop ?? null;
+
+      xtermRef.current.write(data, () => {
+        // Callback fires after xterm finishes processing the write.
+        // Restore the DOM scroll position the user was looking at.
+        if (viewport && scrollTop != null) {
+          viewport.scrollTop = scrollTop;
+        }
+      });
+    } else {
       xtermRef.current.write(data);
     }
   }, []);
@@ -225,16 +249,27 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
 
   // Resize handler with debounce (preserves scroll position)
   const handleResize = useCallback(() => {
+    // Capture scroll state on the FIRST event in a debounce series.
+    // During the 100ms debounce wait the browser/xterm renderer can
+    // process pending layout changes and corrupt the viewport position,
+    // so a save taken inside the timeout would be unreliable.
+    if (!resizeTimeoutRef.current) {
+      preResizeScrollRef.current = saveScrollPosition();
+    }
+
     if (resizeTimeoutRef.current) {
       clearTimeout(resizeTimeoutRef.current);
     }
 
     resizeTimeoutRef.current = setTimeout(() => {
+      resizeTimeoutRef.current = null; // mark end of debounce series
+
       if (fitAddonRef.current && xtermRef.current) {
         const xterm = xtermRef.current;
 
         // Skip scroll preservation when in alternate buffer (TUI apps like Claude CLI)
         if (isInAlternateBufferRef.current) {
+          preResizeScrollRef.current = null;
           fitAddonRef.current.fit();
           const { cols, rows } = xterm;
           prevColsRef.current = cols;
@@ -242,13 +277,26 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
           return;
         }
 
-        // Save scroll position before fit
-        const saved = saveScrollPosition();
+        // Use the early-captured state; fall back to a fresh read (for
+        // callers that bypass the debounce check, e.g. initial layout).
+        const saved = preResizeScrollRef.current ?? saveScrollPosition();
+        preResizeScrollRef.current = null;
         const oldCols = prevColsRef.current;
+        const oldRows = xterm.rows;
 
         fitAddonRef.current.fit();
 
         const { cols, rows } = xterm;
+
+        // Dimension guard: if fit() didn't actually change anything, just
+        // restore the viewport position and bail. This prevents spurious
+        // reflows triggered by focus/blur from moving the viewport.
+        if (cols === oldCols && rows === oldRows) {
+          restoreScrollPosition(saved);
+          prevColsRef.current = cols;
+          return;
+        }
+
         prevColsRef.current = cols;
 
         // When column count changes and user was at the bottom, push old
@@ -256,7 +304,7 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
         // Newlines at the bottom row are the only reliable way to push to
         // scrollback in xterm.js (SU/ED discard lines instead).
         const buffer = xterm.buffer.active;
-        if (oldCols > 0 && cols !== oldCols && saved?.wasAtBottom && buffer.cursorY > 0) {
+        if (oldCols > 0 && cols !== oldCols && saved?.wasAtBottom && !userScrolledBackRef.current && buffer.cursorY > 0) {
           const linesToScroll = buffer.cursorY;
           // Move cursor to bottom row, write newlines to scroll content into
           // scrollback, then reposition cursor to top where the prompt now sits.
@@ -714,13 +762,16 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       return true; // Let all other keys through
     });
 
-    // Set up input handler
+    // Set up input handler — clear scroll-lock on user input so the
+    // terminal follows new output (same as iTerm2 / Kitty behaviour).
     xterm.onData((data) => {
+      userScrolledBackRef.current = false;
       window.terminalAPI.input(sessionId, data).catch(console.error);
     });
 
     // Set up binary input handler (for things like Ctrl+C)
     xterm.onBinary((data) => {
+      userScrolledBackRef.current = false;
       window.terminalAPI.input(sessionId, data).catch(console.error);
     });
 
@@ -1074,9 +1125,13 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
     };
 
     // Also detect scrollbar drag via mousedown on the scrollbar area
-    // and xterm viewport scroll events
+    // and xterm viewport scroll events.  Also update the scroll-lock flag.
     const handleScroll = () => {
       showScrollbar();
+      if (xtermRef.current && !isInAlternateBufferRef.current) {
+        const buf = xtermRef.current.buffer.active;
+        userScrolledBackRef.current = buf.viewportY < buf.baseY;
+      }
     };
 
     container.addEventListener("wheel", handleWheel, { passive: true });
@@ -1144,6 +1199,61 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       }
     }
   }, [isVisible, isFocused, saveScrollPosition, restoreScrollPosition]);
+
+  // Preserve scroll position across OS-level window focus changes.
+  // When the user Cmd-Tabs away and back, Electron can fire resize events
+  // that trigger fit() → reflow → viewport reset.  We snapshot the scroll
+  // state before the page is hidden and restore it AFTER resize operations
+  // settle (200ms > the 100ms resize debounce) so the restore isn't
+  // clobbered by a subsequent fit().
+  useEffect(() => {
+    let savedWasAtBottom = true;
+    let savedScrollTop: number | null = null;
+    let restoreTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        // Going away — snapshot both the logical state and the raw DOM
+        // scroll position so we can pick the right strategy on return.
+        if (xtermRef.current && !isInAlternateBufferRef.current) {
+          const buf = xtermRef.current.buffer.active;
+          savedWasAtBottom = buf.viewportY >= buf.baseY;
+        } else {
+          savedWasAtBottom = true;
+        }
+        const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
+        savedScrollTop = viewport?.scrollTop ?? null;
+      } else {
+        // Coming back — restore after resize/fit operations complete.
+        if (restoreTimeout) clearTimeout(restoreTimeout);
+
+        const doRestore = () => {
+          if (!xtermRef.current) return;
+          if (isInAlternateBufferRef.current) return; // TUI manages its own viewport
+
+          if (savedWasAtBottom) {
+            // New output likely arrived while hidden — jump to the end.
+            xtermRef.current.scrollToBottom();
+          } else if (savedScrollTop != null) {
+            // User was reading scrollback — pin the DOM position.
+            const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
+            if (viewport) viewport.scrollTop = savedScrollTop;
+          }
+        };
+
+        // Immediate attempt (covers cases where no resize fires).
+        requestAnimationFrame(doRestore);
+        // Safety net: repeat after handleResize's 100ms debounce settles.
+        restoreTimeout = setTimeout(doRestore, 200);
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      if (restoreTimeout) clearTimeout(restoreTimeout);
+    };
+  }, []);
 
   // Notify parent when terminal receives focus
   useEffect(() => {

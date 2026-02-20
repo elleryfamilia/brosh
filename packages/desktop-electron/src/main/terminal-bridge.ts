@@ -1963,11 +1963,25 @@ export class TerminalBridge {
     // an expensive getCwd() execSync (pgrep + lsof) on the startup path.
     let lastKnownCwd: string | null = initialCwd ? normalizeCwd(initialCwd) : null;
 
+    // Track whether a command is currently executing (between OSC 133;C and
+    // OSC 133;D/A).  While a command is running, the leaf process in the
+    // process tree may have a different CWD than the user's shell.  We
+    // suppress the debounced getCwd() fallback during this window so that
+    // scripts that temporarily cd elsewhere don't trigger false positives.
+    // OSC 7 (emitted at prompt time) is unaffected by this flag.
+    let commandRunning = false;
+
     // Debounced cwd check - fallback for shells without OSC 7 (e.g., bash)
     // Only spawns lsof after output settles, so it's not running on every keystroke
     // Skips when window is blurred or system is suspended to save battery
     const debouncedCwdCheck = () => {
       if (!this.windowFocused || this.systemSuspended) {
+        return;
+      }
+      // While a command is running, the leaf process may have a transient CWD
+      // (e.g. a script that temporarily cd's elsewhere).  Skip the expensive
+      // process-tree walk until the shell is back at a prompt.
+      if (commandRunning) {
         return;
       }
       if (cwdCheckTimeout) {
@@ -1976,7 +1990,7 @@ export class TerminalBridge {
       cwdCheckTimeout = setTimeout(() => {
         try {
           if (!this.disposed && this.window && !this.window.isDestroyed()
-              && this.windowFocused && !this.systemSuspended) {
+              && this.windowFocused && !this.systemSuspended && !commandRunning) {
             const rawCwd = session.getCwd();
             if (rawCwd) {
               const cwd = normalizeCwd(rawCwd);
@@ -2161,6 +2175,14 @@ export class TerminalBridge {
               sessionId,
               mark,
             });
+
+            // Track whether a command is currently executing so that
+            // debouncedCwdCheck() can skip transient CWD changes.
+            if (mark.type === 'output-start' || mark.type === 'command-start') {
+              commandRunning = true;
+            } else if (mark.type === 'command-end' || mark.type === 'prompt-start') {
+              commandRunning = false;
+            }
 
             // Error detection via exit codes (skip 126=not executable, 127=command not found)
             if (mark.type === 'command-end' && mark.exitCode !== undefined && mark.exitCode !== 0
