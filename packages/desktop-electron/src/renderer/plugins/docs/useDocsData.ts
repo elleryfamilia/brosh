@@ -130,6 +130,7 @@ export function useDocsData({
   // Watchers + events
   useEffect(() => {
     const cleanupGitWatcher = window.terminalAPI.onGitChanged(() => {
+      console.log('[docs] git changed, refreshing files');
       fetchFiles();
     });
 

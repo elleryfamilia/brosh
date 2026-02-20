@@ -7029,6 +7029,7 @@ body,
   border-right: 1px solid var(--border);
   z-index: 20;
   animation: docs-panel-slide-in 0.2s ease;
+  -webkit-app-region: no-drag;
 }
 
 @keyframes docs-panel-slide-in {
@@ -7932,5 +7933,286 @@ body,
 
 @keyframes plans-spin {
   to { transform: rotate(360deg); }
+}
+
+/* Plans index confirmation modal */
+.plans-confirm-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.plans-confirm-dialog {
+  background: var(--bg-primary, #1e1e1e);
+  border: 1px solid var(--border, #333);
+  border-radius: 8px;
+  padding: 20px;
+  max-width: 320px;
+  text-align: center;
+}
+
+.plans-confirm-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--fg, #eee);
+  margin-bottom: 12px;
+}
+
+.plans-confirm-message {
+  font-size: 13px;
+  color: var(--fg-muted, #888);
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.plans-confirm-buttons {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.plans-confirm-btn {
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+  border: none;
+}
+
+.plans-confirm-btn--cancel {
+  background: var(--bg-secondary, #2d2d2d);
+  color: var(--fg, #eee);
+  border: 1px solid var(--border, #444);
+}
+
+.plans-confirm-btn--cancel:hover {
+  background: var(--bg-tertiary, #3d3d3d);
+}
+
+.plans-confirm-btn--confirm {
+  background: var(--accent);
+  color: #fff;
+}
+
+.plans-confirm-btn--confirm:hover {
+  opacity: 0.9;
+}
+
+/* ====================================================
+ * Files plugin — file tree + editor panel styles
+ * ==================================================== */
+
+.files-tree {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+}
+
+.files-tree-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  height: 26px;
+  padding-right: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--fg-primary);
+  text-align: left;
+  transition: background 0.1s;
+}
+
+.files-tree-item:hover {
+  background: color-mix(in srgb, var(--fg-primary) 6%, transparent);
+}
+
+.files-tree-item--selected {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.files-tree-item--selected:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.files-tree-item--directory {
+  font-weight: 500;
+}
+
+.files-tree-chevron {
+  flex-shrink: 0;
+  transition: transform 0.12s ease;
+}
+
+.files-tree-chevron--expanded {
+  transform: rotate(90deg);
+}
+
+.files-tree-chevron-spacer {
+  display: inline-block;
+  width: 14px;
+  flex-shrink: 0;
+}
+
+.files-tree-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.files-icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+/* material-file-icons SVGs use width:100%;height:100% — constrain them */
+.files-icon svg {
+  width: 100%;
+  height: 100%;
+}
+
+.files-inline-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--surface-2);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--fg-primary);
+  font-size: 13px;
+  padding: 1px 6px;
+  outline: none;
+}
+
+.files-inline-input::placeholder {
+  color: var(--fg-muted, #888);
+}
+
+/* Drag-and-drop */
+.files-tree-item--dragging {
+  opacity: 0.4;
+}
+
+.files-tree-item--drop-target {
+  background: rgba(59, 130, 246, 0.15) !important;
+  outline: 1px dashed rgba(59, 130, 246, 0.6);
+  outline-offset: -1px;
+}
+
+.files-tree--drop-active {
+  background: rgba(59, 130, 246, 0.05);
+}
+
+/* Delete confirmation overlay */
+.files-confirm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10001;
+}
+
+.files-confirm-dialog {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 20px;
+  min-width: 300px;
+  max-width: 400px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.files-confirm-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--fg-primary);
+  margin-bottom: 8px;
+}
+
+.files-confirm-message {
+  font-size: 13px;
+  color: var(--fg-secondary, #aaa);
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+.files-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.files-confirm-btn {
+  padding: 6px 14px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--fg-primary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.files-confirm-btn:hover {
+  background: var(--surface-3, var(--surface-2));
+}
+
+.files-confirm-btn--cancel {
+  color: var(--fg-primary);
+}
+
+.files-confirm-btn--danger {
+  background: #d32f2f;
+  border-color: #d32f2f;
+  color: #fff;
+}
+
+.files-confirm-btn--danger:hover {
+  background: #b71c1c;
+}
+
+/* Files editor panel */
+.files-editor-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface-0);
+}
+
+.files-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.files-editor-header-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
 }
 
