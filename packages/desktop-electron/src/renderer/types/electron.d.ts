@@ -161,6 +161,15 @@ export interface TerminalAPI {
   }>;
   gitShowFile: (filePath: string, ref?: string) => Promise<{ success: boolean; content?: string; error?: string }>;
   writeFile: (filePath: string, content: string) => Promise<{ success: boolean; error?: string }>;
+  readDir: (dirPath: string) => Promise<{
+    success: boolean;
+    entries?: Array<{ name: string; isDirectory: boolean; isFile: boolean }>;
+    error?: string;
+  }>;
+  mkDir: (dirPath: string) => Promise<{ success: boolean; error?: string }>;
+  renameFile: (oldPath: string, newPath: string) => Promise<{ success: boolean; error?: string }>;
+  trashItem: (filePath: string) => Promise<{ success: boolean; error?: string }>;
+  showInFolder: (filePath: string) => Promise<{ success: boolean }>;
   gitListMarkdownFiles: (cwd?: string) => Promise<{ success: boolean; files: string[]; root: string | null }>;
   discoverMemoryFiles: (cwd?: string) => Promise<{ success: boolean; files: MemoryFileInfo[] }>;
 
@@ -213,7 +222,7 @@ export interface TerminalAPI {
   indexPlansForProject: (gitRoot: string) => Promise<PlanFileInfo[]>;
   dismissPlan: (gitRoot: string, filename: string) => Promise<PlanFileInfo[]>;
   resetPlanIndex: (gitRoot: string) => Promise<PlanFileInfo[]>;
-  onPlanChanged: (callback: (data: { filePath: string }) => void) => () => void;
+  pollPlansDirectory: () => Promise<{ newFiles: string[]; changedFiles: string[]; deletedFiles: string[] }>;
 }
 
 export interface PlanFileInfo {

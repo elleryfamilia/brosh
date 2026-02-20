@@ -468,6 +468,100 @@ function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
+  ipcMain.handle("file:readdir", async (_event, dirPath: string) => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    try {
+      let resolvedPath = dirPath;
+      if (dirPath.startsWith("~")) {
+        const os = await import("os");
+        resolvedPath = path.join(os.homedir(), dirPath.slice(1));
+      }
+
+      const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
+      const sorted = entries
+        .map((e) => ({ name: e.name, isDirectory: e.isDirectory(), isFile: e.isFile() }))
+        .sort((a, b) => {
+          // Directories first, then case-insensitive alphabetical
+          if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
+          return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+        });
+      return { success: true, entries: sorted };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to read directory",
+      };
+    }
+  });
+
+  ipcMain.handle("file:mkdir", async (_event, dirPath: string) => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    try {
+      let resolvedPath = dirPath;
+      if (dirPath.startsWith("~")) {
+        const os = await import("os");
+        resolvedPath = path.join(os.homedir(), dirPath.slice(1));
+      }
+
+      await fs.mkdir(resolvedPath, { recursive: true });
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to create directory",
+      };
+    }
+  });
+
+  ipcMain.handle("file:rename", async (_event, oldPath: string, newPath: string) => {
+    const fs = await import("fs/promises");
+    const path = await import("path");
+    try {
+      let resolvedOld = oldPath;
+      let resolvedNew = newPath;
+      if (oldPath.startsWith("~")) {
+        const os = await import("os");
+        resolvedOld = path.join(os.homedir(), oldPath.slice(1));
+      }
+      if (newPath.startsWith("~")) {
+        const os = await import("os");
+        resolvedNew = path.join(os.homedir(), newPath.slice(1));
+      }
+      await fs.rename(resolvedOld, resolvedNew);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to rename",
+      };
+    }
+  });
+
+  ipcMain.handle("file:trash", async (_event, filePath: string) => {
+    const path = await import("path");
+    try {
+      let resolvedPath = filePath;
+      if (filePath.startsWith("~")) {
+        const os = await import("os");
+        resolvedPath = path.join(os.homedir(), filePath.slice(1));
+      }
+      await shell.trashItem(resolvedPath);
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Failed to move to trash",
+      };
+    }
+  });
+
+  ipcMain.handle("file:showInFolder", async (_event, filePath: string) => {
+    shell.showItemInFolder(filePath);
+    return { success: true };
+  });
+
   ipcMain.handle("git:listMarkdownFiles", async (_event: Electron.IpcMainInvokeEvent, cwd?: string) => {
     const { execFile } = await import("child_process");
     const { promisify } = await import("util");
@@ -1107,40 +1201,123 @@ function registerIpcHandlers(wm: WindowManager): void {
     }
   }
 
-  // Persistent store for indexed + dismissed plans per project
+  // Persistent store for classified + dismissed plans per project
   interface PlanCacheSchema {
-    planIndexCache: Record<string, { indexedAt: string; filenames: string[] }>;
+    // Per-plan, per-project classification decisions (true = related).
+    // Missing entries = not yet classified (show by default).
+    // Use plan:resetIndex to clear and re-classify.
+    planClassified: Record<string, Record<string, boolean>>;
     planDismissed: Record<string, string[]>; // gitRoot -> dismissed filenames
+    planIndexed: Record<string, boolean>; // gitRoot -> true if indexed at least once
+    migrationVersion: number; // Track migrations to run only once
   }
   const planStore = new Store<PlanCacheSchema>({
     name: "plan-index-cache",
-    defaults: { planIndexCache: {}, planDismissed: {} },
+    defaults: { planClassified: {}, planDismissed: {}, planIndexed: {}, migrationVersion: 0 },
   });
 
-  /** Get plans for a project — only indexed plans, minus dismissed ones */
+  // Run migrations only once based on version
+  {
+    const version = planStore.get("migrationVersion") ?? 0;
+    if (version < 1) {
+      // Migration v1: Clear the entire cache and start fresh.
+      // Old format had issues - easiest to just reset.
+      planStore.set("planClassified", {});
+      planStore.set("planDismissed", {});
+      planStore.set("planIndexed", {});
+      planStore.set("migrationVersion", 1);
+      console.log("[plans] migration v1: reset cache to fresh format");
+    }
+  }
+
+  /** Remove a filename from planClassified and planDismissed across all projects */
+  function pruneDeletedPlan(filename: string): void {
+    const classified = planStore.get("planClassified");
+    let changed = false;
+    for (const gitRoot of Object.keys(classified)) {
+      if (filename in classified[gitRoot]) {
+        delete classified[gitRoot][filename];
+        changed = true;
+      }
+    }
+    if (changed) planStore.set("planClassified", classified);
+
+    const dismissed = planStore.get("planDismissed");
+    for (const gitRoot of Object.keys(dismissed)) {
+      const idx = dismissed[gitRoot]?.indexOf(filename);
+      if (idx !== undefined && idx >= 0) {
+        dismissed[gitRoot].splice(idx, 1);
+        planStore.set("planDismissed", dismissed);
+      }
+    }
+  }
+
+  /** Get plans for a project — only classified-as-related plans (or all if not yet classified), minus dismissed ones.
+   *  Prunes stale entries (files that no longer exist in planIndex). */
   function getPlansForProject(gitRoot: string): Array<{
     absolutePath: string;
     name: string;
     title: string | null;
     mtime: string;
   }> {
-    const cache = planStore.get("planIndexCache");
-    const cached = cache[gitRoot];
-    if (!cached) return [];
+    const allClassified = planStore.get("planClassified");
+    const decisions = allClassified[gitRoot];
+    console.log(`[plans] getPlansForProject(${gitRoot}): decisions =`, decisions, ', planIndex size =', planIndex.size);
 
     const dismissed = new Set(planStore.get("planDismissed")[gitRoot] ?? []);
 
+    // Prune stale entries (files deleted/renamed since last classification)
+    // If decisions becomes empty after pruning, delete the whole entry
+    if (decisions) {
+      let pruned = false;
+      for (const filename of Object.keys(decisions)) {
+        if (!planIndex.has(filename)) {
+          delete decisions[filename];
+          pruned = true;
+        }
+      }
+      if (pruned) {
+        if (Object.keys(decisions).length === 0) {
+          delete allClassified[gitRoot];
+        } else {
+          allClassified[gitRoot] = decisions;
+        }
+        planStore.set("planClassified", allClassified);
+      }
+    }
+
     const results: Array<{ absolutePath: string; name: string; title: string | null; mtime: string }> = [];
-    for (const filename of cached.filenames) {
-      if (dismissed.has(filename)) continue;
-      const entry = planIndex.get(filename);
-      if (entry) {
-        results.push({
-          absolutePath: entry.absolutePath,
-          name: entry.name,
-          title: entry.title,
-          mtime: new Date(entry.mtime).toISOString(),
-        });
+    const planIndexed = planStore.get("planIndexed");
+
+    // If user has never indexed this project, show ALL plans so they can see what's available.
+    // After they've indexed, only show related (TRUE) plans.
+    if (!planIndexed[gitRoot]) {
+      // Show all plans (unclassified)
+      for (const [filename] of planIndex) {
+        if (dismissed.has(filename)) continue;
+        const entry = planIndex.get(filename);
+        if (entry) {
+          results.push({
+            absolutePath: entry.absolutePath,
+            name: entry.name,
+            title: entry.title,
+            mtime: new Date(entry.mtime).toISOString(),
+          });
+        }
+      }
+    } else if (decisions && Object.keys(decisions).length > 0) {
+      // User has indexed - only show related (true) plans
+      for (const [filename, isRelated] of Object.entries(decisions)) {
+        if (!isRelated || dismissed.has(filename)) continue;
+        const entry = planIndex.get(filename);
+        if (entry) {
+          results.push({
+            absolutePath: entry.absolutePath,
+            name: entry.name,
+            title: entry.title,
+            mtime: new Date(entry.mtime).toISOString(),
+          });
+        }
       }
     }
 
@@ -1170,168 +1347,274 @@ function registerIpcHandlers(wm: WindowManager): void {
     return getPlansForProject(gitRoot);
   });
 
-  // IPC: reset plan index for a project
+  // IPC: reset plan index for a project (clears all classification decisions)
   ipcMain.handle("plan:resetIndex", (_event, gitRoot: string) => {
-    const cache = planStore.get("planIndexCache");
-    delete cache[gitRoot];
-    planStore.set("planIndexCache", cache);
+    const classified = planStore.get("planClassified");
+    delete classified[gitRoot];
+    planStore.set("planClassified", classified);
     // Also clear dismissed list so a fresh re-index starts clean
     const dismissed = planStore.get("planDismissed");
     delete dismissed[gitRoot];
     planStore.set("planDismissed", dismissed);
+    // Clear the indexed flag so we can re-index
+    const indexed = planStore.get("planIndexed");
+    delete indexed[gitRoot];
+    planStore.set("planIndexed", indexed);
     return getPlansForProject(gitRoot);
   });
 
-  // IPC: index plans for project (AI-powered)
+  // IPC: poll plans directory for changes (renderer-side polling replaces fs.watch)
+  ipcMain.handle("plan:pollDirectory", () => {
+    const result = { newFiles: [] as string[], changedFiles: [] as string[], deletedFiles: [] as string[] };
+    try {
+      if (!fs.existsSync(plansDirectory)) return result;
+      const currentFiles = new Set<string>();
+      for (const file of fs.readdirSync(plansDirectory)) {
+        if (!file.endsWith(".md")) continue;
+        currentFiles.add(file);
+        const existing = planIndex.get(file);
+        if (!existing) {
+          indexPlanFile(path.join(plansDirectory, file));
+          result.newFiles.push(file);
+        } else {
+          try {
+            const stat = fs.statSync(path.join(plansDirectory, file));
+            if (stat.mtimeMs !== existing.mtime) {
+              indexPlanFile(path.join(plansDirectory, file));
+              result.changedFiles.push(file);
+            }
+          } catch { /* deleted between readdir and stat */ }
+        }
+      }
+      for (const [name] of planIndex) {
+        if (!currentFiles.has(name)) { planIndex.delete(name); result.deletedFiles.push(name); }
+      }
+    } catch { /* directory inaccessible */ }
+
+    // Prune deleted files from persistent store so stale entries don't linger
+    for (const filename of result.deletedFiles) {
+      pruneDeletedPlan(filename);
+    }
+
+    if (result.newFiles.length > 0 || result.changedFiles.length > 0 || result.deletedFiles.length > 0) {
+      console.log('[plans-poll] directory diff:', result);
+    }
+    return result;
+  });
+
+  // IPC: index plans for project (AI-powered, reads CLAUDE.md for context)
+  // Skips plans already classified for this project. Use plan:resetIndex to force re-classification.
+  let planIndexInProgress: Promise<unknown> | null = null;
   ipcMain.handle("plan:indexForProject", async (_event, gitRoot: string) => {
+    // Concurrency guard: wait for any in-progress indexing, then check if work remains
+    if (planIndexInProgress) {
+      await planIndexInProgress;
+    }
+
+    // Determine which plans still need classification for this project
+    // Only consider plans from the last 7 days (to avoid overwhelming the AI)
+    const allClassified = planStore.get("planClassified");
+    const planIndexed = planStore.get("planIndexed");
+    console.log(`[plans] indexForProject: gitRoot=${gitRoot}, planIndexed=`, planIndexed);
+    const projectDecisions = allClassified[gitRoot] ?? {};
+
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const toClassify: string[] = [];
+    for (const [filename, entry] of planIndex) {
+      if (!(filename in projectDecisions) && entry.mtime >= sevenDaysAgo) {
+        toClassify.push(filename);
+      }
+    }
+    console.log(`[plans] toClassify: ${toClassify.length} files, planIndexed[gitRoot]=`, planIndexed[gitRoot]);
+
+    // If already indexed AND no new files to classify, skip
+    if (planIndexed[gitRoot] && toClassify.length === 0) {
+      console.log(`[plans] indexForProject(${gitRoot}): already indexed, no new files`);
+      return getPlansForProject(gitRoot);
+    }
+
+    // Mark as indexed so we don't re-run on every startup (but allow new file detection)
+    if (!planIndexed[gitRoot]) {
+      planIndexed[gitRoot] = true;
+      planStore.set("planIndexed", planIndexed);
+      console.log(`[plans] marked as indexed: ${gitRoot}`);
+    }
+
+    if (toClassify.length === 0) {
+      console.log(`[plans] indexForProject(${gitRoot}): no recent plans to classify`);
+      return getPlansForProject(gitRoot);
+    }
+
+    console.log(`[plans] classifying ${toClassify.length} recent plan(s) for ${gitRoot}`);
+
     const claude = detectClaudeCode();
     if (!claude) return getPlansForProject(gitRoot);
 
-    const folderName = path.basename(gitRoot);
+    // Read CLAUDE.md for project context (try root, then .claude/ subdirectory)
+    let claudeMdContent = "";
+    for (const candidate of [
+      path.join(gitRoot, "CLAUDE.md"),
+      path.join(gitRoot, ".claude", "CLAUDE.md"),
+    ]) {
+      try {
+        claudeMdContent = fs.readFileSync(candidate, "utf-8");
+        break;
+      } catch { /* try next */ }
+    }
 
-    // Build plan list — title + first body sentence (names the project)
+    // Build plan list for unclassified plans only
     const planLines: string[] = [];
-    for (const [name, entry] of planIndex) {
-      let opener = "";
+    for (const filename of toClassify) {
+      const entry = planIndex.get(filename);
+      if (!entry) continue;
+      let contentPreview = "";
       try {
         const content = fs.readFileSync(entry.absolutePath, "utf-8");
-        // Find first non-empty, non-heading line — usually names the project
-        for (const line of content.split("\n")) {
+        // Get first meaningful content (skip title, separators, empty lines)
+        const lines = content.split("\n");
+        for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed || trimmed.startsWith("#") || trimmed.startsWith("---")) continue;
-          opener = trimmed.substring(0, 120);
+          // Get more context - first few lines of actual content
+          contentPreview = trimmed.substring(0, 500);
           break;
         }
       } catch { /* ignore */ }
-      planLines.push(`- ${name}: ${entry.title || "(no title)"}${opener ? ` — ${opener}` : ""}`);
+      planLines.push(`- ${filename}: ${entry.title || "(no title)"}${contentPreview ? ` — ${contentPreview}` : ""}`);
     }
 
     if (planLines.length === 0) {
       return getPlansForProject(gitRoot);
     }
 
-    const prompt = `Which of these plan files belong to the project "${folderName}" at ${gitRoot}?
+    // Build prompt using CLAUDE.md content (or fall back to folder name)
+    let projectContext: string;
+    if (claudeMdContent) {
+      // Include more CLAUDE.md context for better classification
+      const truncated = claudeMdContent.substring(0, 6000);
+      projectContext = `Here is the CLAUDE.md for the project at ${gitRoot}:\n---\n${truncated}\n---`;
+    } else {
+      projectContext = `The project is "${path.basename(gitRoot)}" at ${gitRoot}.`;
+    }
+
+    const prompt = `${projectContext}
+
+Which of these plan files belong to this project?
+
+IMPORTANT: Plans recently created (in the last 24 hours) are likely related to this project since they were likely created while working on it. Consider recently-created plans as related unless clearly unrelated.
 
 ${planLines.join("\n")}
 
 Return ONLY: {"related": ["filename.md"]}`;
 
-    try {
-      const result = await new Promise<string[]>((resolve) => {
-        let proc: ChildProcess | null = null;
-        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const doIndex = (async () => {
+      try {
+        const result = await new Promise<string[]>((resolve) => {
+          let proc: ChildProcess | null = null;
+          let timeoutId: ReturnType<typeof setTimeout> | null = null;
 
-        try {
-          proc = spawn(
-            claude.path,
-            ["-p", "--model", "sonnet", "--output-format", "json"],
-            {
-              cwd: gitRoot,
-              stdio: ["pipe", "pipe", "pipe"],
-              env: { ...process.env },
+          try {
+            proc = spawn(
+              claude.path,
+              ["-p", "--model", "haiku", "--output-format", "json"],
+              {
+                cwd: gitRoot,
+                stdio: ["pipe", "pipe", "pipe"],
+                env: { ...process.env },
+              }
+            );
+
+            if (proc.stdin) {
+              proc.stdin.write(prompt);
+              proc.stdin.end();
             }
-          );
 
-          if (proc.stdin) {
-            proc.stdin.write(prompt);
-            proc.stdin.end();
-          }
+            let stdout = "";
+            proc.stdout?.on("data", (chunk: Buffer) => {
+              stdout += chunk.toString();
+            });
 
-          let stdout = "";
-          proc.stdout?.on("data", (chunk: Buffer) => {
-            stdout += chunk.toString();
-          });
+            timeoutId = setTimeout(() => {
+              if (proc && !proc.killed) proc.kill("SIGTERM");
+              resolve([]);
+            }, 30000);
 
-          timeoutId = setTimeout(() => {
-            if (proc && !proc.killed) proc.kill("SIGTERM");
-            resolve([]);
-          }, 30000);
+            proc.on("error", () => {
+              if (timeoutId) clearTimeout(timeoutId);
+              resolve([]);
+            });
 
-          proc.on("error", () => {
-            if (timeoutId) clearTimeout(timeoutId);
-            resolve([]);
-          });
+            proc.on("close", (code) => {
+              if (timeoutId) clearTimeout(timeoutId);
+              if (code !== 0) { resolve([]); return; }
 
-          proc.on("close", (code) => {
-            if (timeoutId) clearTimeout(timeoutId);
-            if (code !== 0) { resolve([]); return; }
-
-            try {
-              const trimmed = stdout.trim();
-              // claude --output-format json wraps in { result: "..." }
-              let inner: string;
               try {
-                const envelope = JSON.parse(trimmed);
-                if (envelope && typeof envelope.result === "string") {
-                  inner = envelope.result;
-                } else if (envelope && Array.isArray(envelope.related)) {
-                  resolve(envelope.related.filter((f: unknown) => typeof f === "string"));
-                  return;
+                const trimmed = stdout.trim();
+                let inner: string;
+                try {
+                  const envelope = JSON.parse(trimmed);
+                  if (envelope && typeof envelope.result === "string") {
+                    inner = envelope.result;
+                  } else if (envelope && Array.isArray(envelope.related)) {
+                    resolve(envelope.related.filter((f: unknown) => typeof f === "string"));
+                    return;
+                  } else {
+                    resolve([]);
+                    return;
+                  }
+                } catch {
+                  inner = trimmed;
+                }
+
+                let cleaned = inner.trim();
+                if (cleaned.startsWith("```")) {
+                  cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
+                }
+
+                const parsed = JSON.parse(cleaned);
+                if (Array.isArray(parsed.related)) {
+                  resolve(parsed.related.filter((f: unknown) => typeof f === "string"));
                 } else {
                   resolve([]);
-                  return;
                 }
               } catch {
-                inner = trimmed;
-              }
-
-              let cleaned = inner.trim();
-              if (cleaned.startsWith("```")) {
-                cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "");
-              }
-
-              const parsed = JSON.parse(cleaned);
-              if (Array.isArray(parsed.related)) {
-                resolve(parsed.related.filter((f: unknown) => typeof f === "string"));
-              } else {
                 resolve([]);
               }
-            } catch {
-              resolve([]);
-            }
-          });
-        } catch {
-          resolve([]);
+            });
+          } catch {
+            resolve([]);
+          }
+        });
+
+        // Store per-plan decisions: store TRUE for related, FALSE for unrelated.
+        // This prevents re-classifying the same plans on every startup.
+        const relatedSet = new Set(result);
+        for (const filename of toClassify) {
+          projectDecisions[filename] = relatedSet.has(filename);
         }
-      });
+        allClassified[gitRoot] = projectDecisions;
+        planStore.set("planClassified", allClassified);
 
-      // Cache the results (replace, not merge — each index is authoritative)
-      const cache = planStore.get("planIndexCache");
-      cache[gitRoot] = { indexedAt: new Date().toISOString(), filenames: result };
-      planStore.set("planIndexCache", cache);
+        // Mark as indexed so we don't re-index on next startup
+        const indexed = planStore.get("planIndexed");
+        indexed[gitRoot] = true;
+        planStore.set("planIndexed", indexed);
 
-      return getPlansForProject(gitRoot);
-    } catch {
-      return getPlansForProject(gitRoot);
+        console.log(`[plans] classified: ${result.length} related, ${toClassify.length - result.length} unrelated`);
+      } catch {
+        // Classification failed — don't store decisions so we retry next time
+      }
+    })();
+
+    planIndexInProgress = doIndex;
+    try {
+      await doIndex;
+    } finally {
+      planIndexInProgress = null;
     }
+    return getPlansForProject(gitRoot);
   });
 
-  // Watch plans directory for changes
-  let plansWatcher: fs.FSWatcher | null = null;
-  let plansDebounce: ReturnType<typeof setTimeout> | null = null;
-  try {
-    if (fs.existsSync(plansDirectory)) {
-      plansWatcher = fs.watch(plansDirectory, { persistent: false }, (_event, filename) => {
-        if (!filename || !filename.endsWith(".md")) return;
-        if (plansDebounce) clearTimeout(plansDebounce);
-        plansDebounce = setTimeout(() => {
-          const filePath = path.join(plansDirectory, filename);
-          indexPlanFile(filePath);
-          wm.broadcast("plan:changed", { filePath });
-        }, 300);
-      });
-      plansWatcher.on("error", () => {
-        // Directory may not exist, ignore
-      });
-    }
-  } catch {
-    // Ignore watch setup errors
-  }
-
-  app.on("will-quit", () => {
-    plansWatcher?.close();
-    plansWatcher = null;
-  });
 }
 
 /**
@@ -1356,6 +1639,11 @@ function removeIpcHandlers(): void {
   ipcMain.removeHandler("file:read");
   ipcMain.removeHandler("file:write");
   ipcMain.removeHandler("file:stat");
+  ipcMain.removeHandler("file:readdir");
+  ipcMain.removeHandler("file:mkdir");
+  ipcMain.removeHandler("file:rename");
+  ipcMain.removeHandler("file:trash");
+  ipcMain.removeHandler("file:showInFolder");
   ipcMain.removeHandler("git:showFile");
   ipcMain.removeHandler("git:getRoot");
   ipcMain.removeHandler("git:getCommits");
@@ -1402,6 +1690,7 @@ function removeIpcHandlers(): void {
   ipcMain.removeHandler("plan:indexForProject");
   ipcMain.removeHandler("plan:dismiss");
   ipcMain.removeHandler("plan:resetIndex");
+  ipcMain.removeHandler("plan:pollDirectory");
 
   // Updater handlers
   ipcMain.removeHandler("updater:check");

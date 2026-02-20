@@ -181,6 +181,11 @@ contextBridge.exposeInMainWorld("terminalAPI", {
   statFile: (filePath) => ipcRenderer.invoke("file:stat", filePath),
   gitShowFile: (filePath, ref) => ipcRenderer.invoke("git:showFile", filePath, ref),
   writeFile: (filePath, content) => ipcRenderer.invoke("file:write", filePath, content),
+  readDir: (dirPath) => ipcRenderer.invoke("file:readdir", dirPath),
+  mkDir: (dirPath) => ipcRenderer.invoke("file:mkdir", dirPath),
+  renameFile: (oldPath, newPath) => ipcRenderer.invoke("file:rename", oldPath, newPath),
+  trashItem: (filePath) => ipcRenderer.invoke("file:trash", filePath),
+  showInFolder: (filePath) => ipcRenderer.invoke("file:showInFolder", filePath),
   gitListMarkdownFiles: (cwd) => ipcRenderer.invoke("git:listMarkdownFiles", cwd),
   discoverMemoryFiles: (cwd) => ipcRenderer.invoke("context:discoverMemoryFiles", cwd),
 
@@ -259,13 +264,7 @@ contextBridge.exposeInMainWorld("terminalAPI", {
   indexPlansForProject: (gitRoot) => ipcRenderer.invoke("plan:indexForProject", gitRoot),
   dismissPlan: (gitRoot, filename) => ipcRenderer.invoke("plan:dismiss", gitRoot, filename),
   resetPlanIndex: (gitRoot) => ipcRenderer.invoke("plan:resetIndex", gitRoot),
-  onPlanChanged: (callback) => {
-    const handler = (_event, data) => callback(data);
-    ipcRenderer.on("plan:changed", handler);
-    return () => {
-      ipcRenderer.removeListener("plan:changed", handler);
-    };
-  },
+  pollPlansDirectory: () => ipcRenderer.invoke("plan:pollDirectory"),
 
   // Analytics
   analyticsGetConsent: () => ipcRenderer.invoke("analytics:getConsent"),

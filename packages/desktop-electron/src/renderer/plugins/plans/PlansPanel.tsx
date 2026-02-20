@@ -5,7 +5,7 @@
  * Plans are discovered via AI-powered indexing and can be dismissed.
  */
 
-import { useCallback, useRef } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import type { PanelProps } from '../types';
 import { usePlansData } from './usePlansData';
 import { PlansIcon } from './PlansIcon';
@@ -36,6 +36,7 @@ function formatRelativeTime(isoDate: string): string {
 
 export function PlansPanel({ context, width, onResize, onClose }: PanelProps) {
   const { workspace, isActive } = context;
+  const [showIndexConfirm, setShowIndexConfirm] = useState(false);
 
   const focusedSessionIdRef = useRef(workspace.focusedSessionId);
   focusedSessionIdRef.current = workspace.focusedSessionId;
@@ -43,7 +44,7 @@ export function PlansPanel({ context, width, onResize, onClose }: PanelProps) {
 
   const gitRoot = workspace.git?.projectRoot ?? null;
 
-  const { plans, loading, indexing, refresh, indexPlans, dismissPlan, resetIndex } = usePlansData({
+  const { plans, loading, indexing, hasIndexed, refresh, indexPlans, dismissPlan, resetIndex } = usePlansData({
     getFocusedSessionId,
     isActive,
     focusedSessionId: workspace.focusedSessionId,
@@ -83,6 +84,15 @@ export function PlansPanel({ context, width, onResize, onClose }: PanelProps) {
     [dismissPlan, plans, context]
   );
 
+  const handleIndexPlans = useCallback(() => {
+    setShowIndexConfirm(true);
+  }, []);
+
+  const confirmIndex = useCallback(() => {
+    setShowIndexConfirm(false);
+    indexPlans();
+  }, [indexPlans]);
+
   // Sidebar resize (right edge)
   const resizeRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
@@ -120,7 +130,7 @@ export function PlansPanel({ context, width, onResize, onClose }: PanelProps) {
           <span className="docs-panel-title">{headerTitle}</span>
         </div>
         <div className="docs-panel-actions">
-          {plans.length > 0 && (
+          {(plans.length > 0 || hasIndexed) && (
             <button
               className="docs-panel-btn"
               onClick={resetIndex}
@@ -207,7 +217,7 @@ export function PlansPanel({ context, width, onResize, onClose }: PanelProps) {
             <div className="plans-empty-text">No plans found for this project</div>
             <button
               className="plans-index-btn"
-              onClick={indexPlans}
+              onClick={handleIndexPlans}
               type="button"
             >
               Index Plans
@@ -215,6 +225,35 @@ export function PlansPanel({ context, width, onResize, onClose }: PanelProps) {
           </div>
         ) : null}
       </div>
+
+      {/* Index confirmation modal */}
+      {showIndexConfirm && (
+        <div className="plans-confirm-overlay">
+          <div className="plans-confirm-dialog">
+            <div className="plans-confirm-title">Index Plans</div>
+            <div className="plans-confirm-message">
+              Indexing plans uses AI to classify which plans are related to this project.
+              This will incur AI usage.
+            </div>
+            <div className="plans-confirm-buttons">
+              <button
+                className="plans-confirm-btn plans-confirm-btn--cancel"
+                onClick={() => setShowIndexConfirm(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="plans-confirm-btn plans-confirm-btn--confirm"
+                onClick={confirmIndex}
+                type="button"
+              >
+                Index Plans
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Resize handle (right edge) */}
       <div className="docs-panel-resize-handle" onMouseDown={handleResizeStart} />

@@ -62,6 +62,7 @@
     "electron-store": "^10.0.0",
     "electron-updater": "^6.7.3",
     "fastest-levenshtein": "^1.0.16",
+    "material-file-icons": "^2.4.0",
     "monaco-editor": "^0.55.1",
     "monaco-vim": "^0.4.4",
     "posthog-node": "^5.24.7",
@@ -76,7 +77,7 @@
     "@vitejs/plugin-react": "^4.2.0",
     "@vitest/coverage-v8": "^2.0.0",
     "concurrently": "^8.2.0",
-    "electron": "^33.0.0",
+    "electron": "^33.4.11",
     "electron-builder": "^25.0.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
@@ -170,7 +171,9 @@
     "linux": {
       "icon": "resources/icons/png",
       "category": "Development",
-      "target": ["deb"],
+      "target": [
+        "deb"
+      ],
       "executableName": "brosh"
     },
     "deb": {

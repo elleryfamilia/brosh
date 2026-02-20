@@ -8,6 +8,7 @@
 import './git/index';
 import './docs/index';
 import './plans/index';
+import './files/index';
 
 // Re-export infrastructure
 export { registerSidebarPlugin, getPlugins, getPlugin } from './registry';
