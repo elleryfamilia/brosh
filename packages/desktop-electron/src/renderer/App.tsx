@@ -1208,13 +1208,19 @@ export function App() {
     if (prevProjectRootRef.current !== null &&
         prevProjectRootRef.current !== projectRoot &&
         editorFile) {
-      const pref = settings.git?.closeDiffOnDirChange ?? 'ask';
-      if (pref === 'close') {
-        setEditorFile(null);
-      } else if (pref === 'ask') {
-        setShowDiffBanner(true);
+      // If the open file is inside the NEW project root the diff is still
+      // valid — no reason to prompt.  This avoids false positives when the
+      // user cd's back into the project where Claude opened the diff.
+      const fileStillInProject = projectRoot && editorFile.filePath.startsWith(projectRoot);
+      if (!fileStillInProject) {
+        const pref = settings.git?.closeDiffOnDirChange ?? 'ask';
+        if (pref === 'close') {
+          setEditorFile(null);
+        } else if (pref === 'ask') {
+          setShowDiffBanner(true);
+        }
+        // 'keep' → do nothing
       }
-      // 'keep' → do nothing
     }
     prevProjectRootRef.current = projectRoot;
   }, [projectRoot]); // eslint-disable-line react-hooks/exhaustive-deps
