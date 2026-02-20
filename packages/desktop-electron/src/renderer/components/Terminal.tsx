@@ -776,15 +776,24 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
     });
 
     // Listen for buffer changes (normal <-> alternate) for TUI apps like Claude CLI, vim, etc.
+    // TUI frameworks (ink/React CLI) can rapidly exit and re-enter the alternate buffer
+    // during re-renders.  We guard against this by:
+    //   1. Only saving the normal-buffer position on the FIRST entry (don't overwrite
+    //      with a stale viewportY=0 during a rapid re-entry).
+    //   2. Skipping the rAF restore if we've already re-entered the alternate buffer
+    //      (the exit was transient, not real).
     const bufferChangeDisposable = xterm.buffer.onBufferChange((buffer) => {
       if (buffer.type === 'alternate') {
-        // Entering alternate buffer - save normal buffer scroll position
-        const normalBuffer = xterm.buffer.normal;
-        savedNormalBufferScrollRef.current = {
-          scrollPos: normalBuffer.viewportY,
-          baseY: normalBuffer.baseY,
-          wasAtBottom: normalBuffer.viewportY >= normalBuffer.baseY,
-        };
+        // Entering alternate buffer — save only if we don't already have a
+        // snapshot (preserves the correct position through rapid cycles).
+        if (!savedNormalBufferScrollRef.current) {
+          const normalBuffer = xterm.buffer.normal;
+          savedNormalBufferScrollRef.current = {
+            scrollPos: normalBuffer.viewportY,
+            baseY: normalBuffer.baseY,
+            wasAtBottom: normalBuffer.viewportY >= normalBuffer.baseY,
+          };
+        }
         isInAlternateBufferRef.current = true;
       } else {
         // Returning to normal buffer - restore scroll position
@@ -794,6 +803,12 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
 
         requestAnimationFrame(() => {
           if (!saved) {
+            return;
+          }
+
+          // If we're back in alternate buffer the exit was transient
+          // (rapid exit/enter cycle) — skip the restore.
+          if (isInAlternateBufferRef.current) {
             return;
           }
 
