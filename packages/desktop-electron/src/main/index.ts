@@ -43,6 +43,26 @@ import Store from "electron-store";
 // Set app name for menu bar (productName in build config only applies when packaged)
 app.setName("brosh");
 
+// In dev mode, app.getVersion() returns Electron's version instead of ours.
+// Read the real version from package.json.
+let appVersion = app.getVersion();
+if (!app.isPackaged) {
+  try {
+    const pkgPath = path.join(__dirname, "../../package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+    if (pkg.version) appVersion = pkg.version;
+  } catch {
+    // Fall back to Electron's version
+  }
+}
+
+app.setAboutPanelOptions({
+  applicationName: "brosh",
+  applicationVersion: app.isPackaged ? appVersion : `${appVersion}-dev`,
+  copyright: "Copyright © 2025 Ellery Familia",
+  website: "https://github.com/elleryfamilia/brosh",
+});
+
 // Global window manager
 let windowManager: WindowManager | null = null;
 

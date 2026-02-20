@@ -136,6 +136,12 @@ export interface TerminalAPI {
 
   // Menu events
   onMenuPreferences: (callback: () => void) => () => void;
+  onMenuCloseTerminal: (callback: () => void) => () => void;
+  onMenuClearTerminal: (callback: () => void) => () => void;
+  onMenuScrollToTop: (callback: () => void) => () => void;
+  onMenuScrollToBottom: (callback: () => void) => () => void;
+  onMenuSplitRight: (callback: () => void) => () => void;
+  onMenuSplitDown: (callback: () => void) => () => void;
 
   // Window management
   createWindow: () => Promise<{ success: boolean }>;

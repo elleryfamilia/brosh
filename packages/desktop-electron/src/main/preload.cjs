@@ -166,6 +166,48 @@ contextBridge.exposeInMainWorld("terminalAPI", {
       ipcRenderer.removeListener("menu:preferences", handler);
     };
   },
+  onMenuCloseTerminal: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("menu:closeTerminal", handler);
+    return () => {
+      ipcRenderer.removeListener("menu:closeTerminal", handler);
+    };
+  },
+  onMenuClearTerminal: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("menu:clearTerminal", handler);
+    return () => {
+      ipcRenderer.removeListener("menu:clearTerminal", handler);
+    };
+  },
+  onMenuScrollToTop: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("menu:scrollToTop", handler);
+    return () => {
+      ipcRenderer.removeListener("menu:scrollToTop", handler);
+    };
+  },
+  onMenuScrollToBottom: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("menu:scrollToBottom", handler);
+    return () => {
+      ipcRenderer.removeListener("menu:scrollToBottom", handler);
+    };
+  },
+  onMenuSplitRight: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("menu:splitRight", handler);
+    return () => {
+      ipcRenderer.removeListener("menu:splitRight", handler);
+    };
+  },
+  onMenuSplitDown: (callback) => {
+    const handler = () => callback();
+    ipcRenderer.on("menu:splitDown", handler);
+    return () => {
+      ipcRenderer.removeListener("menu:splitDown", handler);
+    };
+  },
 
   // Window management
   createWindow: () => ipcRenderer.invoke("window:create"),

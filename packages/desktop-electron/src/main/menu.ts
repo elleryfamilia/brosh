@@ -76,6 +76,17 @@ export function createMenu(windowManager: WindowManager): void {
         },
         { type: "separator" },
         {
+          label: "Split Right",
+          accelerator: "CmdOrCtrl+D",
+          click: () => sendToActive("menu:splitRight"),
+        },
+        {
+          label: "Split Down",
+          accelerator: "CmdOrCtrl+Shift+D",
+          click: () => sendToActive("menu:splitDown"),
+        },
+        { type: "separator" },
+        {
           label: "Close Pane",
           accelerator: "CmdOrCtrl+W",
           click: () => sendToActive("menu:closeTerminal"),
@@ -108,10 +119,14 @@ export function createMenu(windowManager: WindowManager): void {
     {
       label: "View",
       submenu: [
-        { role: "reload" },
-        { role: "forceReload" },
-        { role: "toggleDevTools" },
-        { type: "separator" },
+        ...(!app.isPackaged
+          ? [
+              { role: "reload" as const },
+              { role: "forceReload" as const },
+              { role: "toggleDevTools" as const },
+              { type: "separator" as const },
+            ]
+          : []),
         { role: "resetZoom" },
         { role: "zoomIn" },
         { role: "zoomOut" },
@@ -124,21 +139,6 @@ export function createMenu(windowManager: WindowManager): void {
     {
       label: "Terminal",
       submenu: [
-        {
-          label: "Run Command...",
-          accelerator: "CmdOrCtrl+Shift+P",
-          click: () => sendToActive("menu:commandPalette"),
-        },
-        { type: "separator" },
-        {
-          label: "Start Recording",
-          click: () => sendToActive("menu:startRecording"),
-        },
-        {
-          label: "Stop Recording",
-          click: () => sendToActive("menu:stopRecording"),
-        },
-        { type: "separator" },
         {
           label: "Scroll to Top",
           accelerator: "CmdOrCtrl+Home",
@@ -179,18 +179,6 @@ export function createMenu(windowManager: WindowManager): void {
           click: async () => {
             await shell.openExternal("https://github.com/elleryfamilia/brosh/issues");
           },
-        },
-        { type: "separator" },
-        {
-          label: "Check for Updates...",
-          click: async () => {
-            const { checkForUpdates } = await import("./auto-updater.js");
-            checkForUpdates();
-          },
-        },
-        {
-          label: "About brosh",
-          click: () => sendToActive("menu:about"),
         },
       ],
     },

@@ -1170,6 +1170,19 @@ export function App() {
     return cleanup;
   }, [openSettings]);
 
+  // Listen for menu events (close, clear, scroll, split)
+  useEffect(() => {
+    const cleanups = [
+      window.terminalAPI.onMenuCloseTerminal(() => closeFocusedPane()),
+      window.terminalAPI.onMenuClearTerminal(() => findBarTerminalMethodsRef.current?.clear()),
+      window.terminalAPI.onMenuScrollToTop(() => findBarTerminalMethodsRef.current?.scrollToTop()),
+      window.terminalAPI.onMenuScrollToBottom(() => findBarTerminalMethodsRef.current?.scrollToBottom()),
+      window.terminalAPI.onMenuSplitRight(() => splitFocusedPane("horizontal")),
+      window.terminalAPI.onMenuSplitDown(() => splitFocusedPane("vertical")),
+    ];
+    return () => cleanups.forEach((fn) => fn());
+  }, [closeFocusedPane, splitFocusedPane]);
+
   // Fetch home directory once on mount
   useEffect(() => {
     window.terminalAPI.getHomedir().then((dir) => {

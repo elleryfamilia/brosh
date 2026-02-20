@@ -45,6 +45,8 @@ export interface TerminalMethods {
   paste: () => Promise<void>;
   selectAll: () => void;
   clear: () => void;
+  scrollToTop: () => void;
+  scrollToBottom: () => void;
   hasSelection: () => boolean;
   getSelection: () => string;
   findNext: (term: string, options?: SearchOptions) => boolean;
@@ -1188,6 +1190,12 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       if (xtermRef.current) {
         xtermRef.current.clear();
       }
+    },
+    scrollToTop: () => {
+      xtermRef.current?.scrollToTop();
+    },
+    scrollToBottom: () => {
+      xtermRef.current?.scrollToBottom();
     },
     hasSelection: () => {
       if (xtermRef.current) {
