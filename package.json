@@ -1,7 +1,7 @@
 {
   "name": "brosh",
   "version": "0.1.1",
-  "description": "A modern terminal emulator with built-in AI integration via MCP",
+  "description": "Terminal MCP bridge for AI-powered development",
   "author": "Ellery Familia",
   "repository": {
     "type": "git",
