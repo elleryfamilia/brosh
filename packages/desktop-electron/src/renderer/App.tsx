@@ -96,26 +96,6 @@ function calculateTerminalSize() {
   };
 }
 
-// Resize handle for the editor panel (drag to resize width)
-function EditorPanelResizeHandle({ width, onResize }: { width: number; onResize: (w: number) => void }) {
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    const startX = e.clientX;
-    const startWidth = width;
-
-    const onMouseMove = (ev: MouseEvent) => {
-      onResize(startWidth + ev.clientX - startX);
-    };
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-    };
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-  }, [width, onResize]);
-
-  return <div className="editor-panel-resize-handle" onMouseDown={handleMouseDown} />;
-}
 
 export function App() {
   const [tabs, setTabs] = useState<TabState[]>([]);
@@ -182,10 +162,6 @@ export function App() {
   const [showDiffBanner, setShowDiffBanner] = useState(false);
   const diffBannerRememberRef = useRef(false);
 
-  const [editorPanelWidth, setEditorPanelWidth] = useState(() => {
-    const stored = localStorage.getItem('editorPanelWidth');
-    return stored ? Math.max(200, parseInt(stored, 10) || 500) : 500;
-  });
 
   // Toast notification state
   const [toasts, setToasts] = useState<ToastData[]>([]);
@@ -241,12 +217,6 @@ export function App() {
     findBarTerminalMethodsRef.current?.clearSearch();
   }, []);
 
-  // Handle editor panel resize
-  const handleEditorPanelResize = useCallback((width: number) => {
-    const clamped = Math.max(200, width);
-    setEditorPanelWidth(clamped);
-    localStorage.setItem('editorPanelWidth', String(clamped));
-  }, []);
 
   // Get focused session ID from refs (for use in callbacks without stale closures)
   const getFocusedSessionId = useCallback((): string | null => {
@@ -1757,10 +1727,9 @@ export function App() {
           return (
             <div className="editor-panel" style={{
               left: sidebarWidth,
-              width: editorPanelWidth,
-              maxWidth: showClaudePanel
-                ? `calc(100% - ${sidebarWidth}px - ${claudePanelWidth + 8}px)`
-                : undefined,
+              width: showClaudePanel
+                ? `calc(100% - ${sidebarWidth}px - ${claudePanelWidth}px)`
+                : `calc((100% - ${sidebarWidth}px) / 2)`,
             }}>
               {showDiffBanner && (
                 <div className="diff-change-overlay">
@@ -1812,16 +1781,21 @@ export function App() {
                   onClose={handleEditorClose}
                 />
               )}
-              <EditorPanelResizeHandle width={editorPanelWidth} onResize={handleEditorPanelResize} />
             </div>
           );
         })()}
-        {tabs.map((tab) => (
+        {tabs.map((tab) => {
+          const editorActive = !!(activeSidebarPlugin && editorFile);
+          const hideTerminals = editorActive && showClaudePanel;
+
+          return (
           <div
             key={tab.id}
-            className={`terminal-wrapper ${tab.id === activeTabId ? "visible" : "hidden"}`}
+            className={`terminal-wrapper ${hideTerminals ? "hidden" : (tab.id === activeTabId ? "visible" : "hidden")}`}
             style={{
-              left: sidebarWidth + (activeSidebarPlugin && editorFile ? editorPanelWidth : 0),
+              left: editorActive && !showClaudePanel
+                ? `calc(${sidebarWidth}px + (100% - ${sidebarWidth}px) / 2)`
+                : sidebarWidth,
               right: showClaudePanel ? claudePanelWidth : 0,
             }}
           >
@@ -1852,7 +1826,8 @@ export function App() {
               onDismissError={handleDismissError}
             />
           </div>
-        ))}
+          );
+        })}
         {tabs.length === 0 && !showModeModal && !showWelcomeModal && welcomeCheckComplete && (
           <div className="no-tabs">
             <p>No terminals open</p>
