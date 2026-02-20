@@ -17,6 +17,7 @@ import {
   TerminalManager,
   GUIOutputStream,
   SandboxController,
+  preWarmSession,
   type GuiMessageToFrontend,
   type ManagedSession,
   type SandboxPermissions,
@@ -343,6 +344,16 @@ export class TerminalBridge {
   // Key: sessionId, Value: array of base64-encoded data chunks
   private suspendedOutputBuffer: Map<string, string[]> = new Map();
 
+  // Speculative standard-mode session — pre-created while the mode selection
+  // modal is visible so the first "Standard" click is near-instant.
+  // Disposed if the user picks sandbox mode instead.
+  private speculativeSession: {
+    session: ManagedSession;
+    consumed: boolean;
+    cwd: string;
+  } | null = null;
+  private speculativeSessionReady: Promise<void> | null = null;
+
   constructor(window: BrowserWindow) {
     this.window = window;
     this.guiStream = new GUIOutputStream();
@@ -364,6 +375,15 @@ export class TerminalBridge {
 
     // Initialize AI detection system
     this.initializeAIDetection();
+
+    // Pre-warm terminal session resources and speculatively create a standard
+    // session while the mode selection modal is visible. This front-loads
+    // ~600-1000ms of PTY spawn + shell init time so "Standard" click is instant.
+    setTimeout(() => {
+      const settings = getSettings();
+      preWarmSession({ nativeShell: true, setLocaleEnv: settings.terminal.setLocaleEnv });
+      this.speculativeSessionReady = this.preCreateStandardSession();
+    }, 0);
   }
 
   /**
@@ -394,6 +414,45 @@ export class TerminalBridge {
     } catch (error) {
       console.error("[terminal-bridge] Failed to initialize AI detection:", error);
       this.aiDetectionInitialized = true; // Mark as initialized to avoid blocking
+    }
+  }
+
+  /**
+   * Speculatively create a standard-mode terminal session while the mode
+   * selection modal is visible. If the user clicks "Standard", we hand back
+   * this pre-created session (near-instant). If they pick sandbox, we dispose
+   * it and create a fresh one with the sandbox controller.
+   */
+  private async preCreateStandardSession(): Promise<void> {
+    // Guard: skip if a speculative session is already available
+    if (this.speculativeSession) return;
+
+    try {
+      const settings = getSettings();
+
+      // Create manager early (standard mode — no sandbox controller)
+      if (!this.manager) {
+        this.manager = new TerminalManager({
+          cols: 120,
+          rows: 40,
+          nativeShell: true,
+          setLocaleEnv: settings.terminal.setLocaleEnv,
+        });
+        this.guiStream.attachManager(this.manager);
+
+        for (const callback of this.managerReadyCallbacks) {
+          callback(this.manager);
+        }
+      }
+
+      const cwd = os.homedir();
+      const session = await this.manager.createSession({ cols: 120, rows: 40, cwd });
+
+      this.speculativeSession = { session, consumed: false, cwd };
+      debug("Pre-created speculative standard session:", session.id);
+    } catch (err) {
+      console.error("[terminal-bridge] Failed to pre-create speculative session:", err);
+      this.speculativeSession = null;
     }
   }
 
@@ -445,7 +504,76 @@ export class TerminalBridge {
   }> {
     debug("Creating terminal session with options:", options);
     try {
-      // Create manager if not exists
+      // Wait for speculative session creation to finish (if still in flight)
+      if (this.speculativeSessionReady) {
+        await this.speculativeSessionReady;
+        this.speculativeSessionReady = null;
+      }
+
+      // ── Fast path: consume the speculative standard-mode session ──
+      if (!this.useSandboxMode && this.speculativeSession && !options?.shell) {
+        const spec = this.speculativeSession;
+        this.speculativeSession = null;
+        spec.consumed = true; // stop buffering new data
+
+        const session = spec.session;
+        const sessionId = session.id;
+
+        // Resize if the renderer's dimensions differ from the default 120×40
+        const cols = options?.cols ?? 120;
+        const rows = options?.rows ?? 40;
+        const dims = session.getDimensions();
+        if (cols !== dims.cols || rows !== dims.rows) {
+          session.resize(cols, rows);
+        }
+
+        // Set up event forwarding (new onData listener takes over from here)
+        const cwd = options?.cwd ?? spec.cwd;
+        this.setupSessionEvents(session, cwd);
+
+        // Force the shell to redraw its prompt at the correct dimensions once
+        // the renderer has mounted. We don't replay the old buffered data because
+        // it was formatted for the speculative 120×40 PTY — replaying it at a
+        // different width garbles zsh's PROMPT_SP escape (the visible `%` bug).
+        setTimeout(() => {
+          if (!this.disposed && session.isActive()) {
+            session.resize(cols, rows);
+          }
+        }, 80);
+
+        if (!this.firstSessionCreated) {
+          this.firstSessionCreated = true;
+        }
+
+        debug("Used speculative session:", sessionId, session.getDimensions());
+
+        // Pre-create the next speculative session so the next split/window is instant
+        this.speculativeSessionReady = this.preCreateStandardSession();
+
+        const finalDims = session.getDimensions();
+        return {
+          success: true,
+          sessionId,
+          cols: finalDims.cols,
+          rows: finalDims.rows,
+        };
+      }
+
+      // ── Sandbox path: dispose speculative session + manager ──
+      if (this.speculativeSession) {
+        const spec = this.speculativeSession;
+        this.speculativeSession = null;
+        spec.consumed = true;
+        debug("Disposing speculative session for sandbox mode:", spec.session.id);
+        this.manager?.closeSession(spec.session.id);
+        // Manager was created without sandbox controller — recreate it
+        if (this.manager) {
+          this.manager.dispose();
+          this.manager = null;
+        }
+      }
+
+      // ── Normal path: create manager + session from scratch ──
       if (!this.manager) {
         const settings = getSettings();
         debug("Creating new TerminalManager", {
@@ -458,23 +586,17 @@ export class TerminalBridge {
           rows: options?.rows ?? 40,
           shell: options?.shell,
           cwd: options?.cwd,
-          // Use native shell in Electron - no custom prompt, user's normal config
           nativeShell: true,
-          // Only set locale env vars if explicitly enabled (avoids SSH locale issues)
           setLocaleEnv: settings.terminal.setLocaleEnv,
-          // Pass sandbox controller if sandbox mode is enabled
           sandboxController: this.useSandboxMode ? this.sandboxController ?? undefined : undefined,
         });
         this.guiStream.attachManager(this.manager);
 
-        // Notify listeners that manager is ready
         for (const callback of this.managerReadyCallbacks) {
           callback(this.manager);
         }
       }
 
-      // Create a new session using multi-session API
-      // Default to home directory if no cwd specified
       const cwd = options?.cwd ?? os.homedir();
       debug("Creating new session with cwd:", cwd);
       const session = await this.manager.createSession({
@@ -485,11 +607,9 @@ export class TerminalBridge {
       });
       debug("Session created:", session.id);
 
-      // Set up event forwarding for this session
-      this.setupSessionEvents(session);
+      this.setupSessionEvents(session, cwd);
       debug("Event forwarding set up for", session.id);
 
-      // Mark first session as created (but don't auto-attach MCP - let user enable it explicitly)
       if (!this.firstSessionCreated) {
         this.firstSessionCreated = true;
       }
@@ -497,14 +617,15 @@ export class TerminalBridge {
       const dims = session.getDimensions();
       debug("Session ready:", session.id, dims);
 
-      // In sandbox mode, clear the screen after shell initializes to hide startup warnings
       if (this.useSandboxMode) {
         setTimeout(() => {
-          // Send clear command to hide sandbox startup warnings
           if (session.isActive()) {
             session.write('clear\n');
           }
-        }, 300); // Give shell time to initialize
+        }, 300);
+      } else {
+        // Pre-create the next speculative session for instant split panes
+        this.speculativeSessionReady = this.preCreateStandardSession();
       }
 
       return {
@@ -1825,7 +1946,7 @@ export class TerminalBridge {
   /**
    * Set up event forwarding for a session
    */
-  private setupSessionEvents(session: ManagedSession): void {
+  private setupSessionEvents(session: ManagedSession, initialCwd?: string): void {
     const sessionId = session.id;
     let lastProcessName = session.getProcess();
     let lastOscTitle: string | null = null;
@@ -1838,12 +1959,9 @@ export class TerminalBridge {
       return p.replace(/\/+$/, '') || '/';
     };
 
-    // Initialize with the session's starting CWD so the first prompt's
-    // OSC 7 emission doesn't fire a spurious cwd-changed event.
-    let lastKnownCwd: string | null = (() => {
-      const cwd = session.getCwd();
-      return cwd ? normalizeCwd(cwd) : null;
-    })();
+    // Initialize with the known CWD (passed from createSession) to avoid
+    // an expensive getCwd() execSync (pgrep + lsof) on the startup path.
+    let lastKnownCwd: string | null = initialCwd ? normalizeCwd(initialCwd) : null;
 
     // Debounced cwd check - fallback for shells without OSC 7 (e.g., bash)
     // Only spawns lsof after output settles, so it's not running on every keystroke
@@ -2225,6 +2343,12 @@ export class TerminalBridge {
    */
   dispose(): void {
     this.disposed = true;
+
+    // Discard unconsumed speculative session
+    if (this.speculativeSession) {
+      this.speculativeSession.consumed = true;
+      this.speculativeSession = null;
+    }
 
     // Discard any buffered output (no point flushing to a closing window)
     this.suspendedOutputBuffer.clear();

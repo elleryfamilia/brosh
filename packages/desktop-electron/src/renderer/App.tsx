@@ -310,21 +310,11 @@ export function App() {
         throw new Error(result.error || "Failed to create session");
       }
 
-      let processName = "shell";
-      try {
-        const processResult = await window.terminalAPI.getProcess(
-          result.sessionId
-        );
-        if (processResult.success && processResult.process) {
-          processName = processResult.process;
-        }
-      } catch {
-        // Use default
-      }
-
+      // Use "shell" as default — the real process name arrives via the
+      // process-changed event within ~100ms and updates the pane header.
       return {
         sessionId: result.sessionId,
-        processName,
+        processName: "shell",
         isSandboxed: mode === "sandbox",
         sandboxConfig: mode === "sandbox" ? config : undefined,
       };

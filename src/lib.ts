@@ -6,7 +6,7 @@
  */
 
 // Terminal management
-export { TerminalSession, TerminalManager } from "./terminal/index.js";
+export { TerminalSession, TerminalManager, preWarmSession } from "./terminal/index.js";
 export type {
   TerminalSessionOptions,
   ScreenshotResult,

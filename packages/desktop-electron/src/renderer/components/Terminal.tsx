@@ -330,71 +330,73 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       }
     }
 
-    // Load WebLinksAddon for clickable URLs (including file:// links)
-    try {
-      // Custom regex that matches http://, https://, and file:// URLs
-      const urlRegex = /(?:https?|file):\/\/[^\s`'"()<>\[\]]+/;
-
-      const webLinksAddon = new WebLinksAddon((event, uri) => {
-        event.preventDefault();
-
-        if (uri.startsWith('file://')) {
-          // Handle file:// links - open in editor pane
-          const filePath = uri.slice(7); // Remove "file://"
-          const isDiff = event.shiftKey;
-          if (onFileLinkRef.current) {
-            onFileLinkRef.current(filePath, isDiff);
-          }
-        } else {
-          // Open HTTP URLs in default browser via secure IPC
-          window.terminalAPI.openExternal(uri).catch(console.error);
-        }
-      }, {
-        urlRegex,
-      });
-      xterm.loadAddon(webLinksAddon);
-      webLinksAddonRef.current = webLinksAddon;
-    } catch (e) {
-      console.warn("WebLinks addon not available:", e);
-    }
-
-    // Load ImageAddon for SIXEL and iTerm2 IIP (OSC 1337) inline images
-    try {
-      const imageAddon = new ImageAddon({
-        enableSizeReports: true,
-        pixelLimit: 16777216,      // 16MP max image size
-        storageLimit: 128,         // 128MB cache for images
-        showPlaceholder: true,     // Show placeholder while loading
-        sixelSupport: true,        // Enable SIXEL protocol
-        sixelScrolling: true,      // Allow scrolling with SIXEL
-      });
-      xterm.loadAddon(imageAddon);
-      imageAddonRef.current = imageAddon;
-    } catch (e) {
-      console.warn("Image addon not available:", e);
-    }
-
-    // Load ClipboardAddon for OSC 52 clipboard sync (zellij, tmux, vim over SSH)
-    try {
-      const clipboardAddon = new ClipboardAddon();
-      xterm.loadAddon(clipboardAddon);
-      clipboardAddonRef.current = clipboardAddon;
-    } catch (e) {
-      console.warn("Clipboard addon not available:", e);
-    }
-
-    // Load SearchAddon for find functionality (Cmd/Ctrl+F)
-    try {
-      const searchAddon = new SearchAddon();
-      xterm.loadAddon(searchAddon);
-      searchAddonRef.current = searchAddon;
-    } catch (e) {
-      console.warn("Search addon not available:", e);
-    }
-
-    // Open terminal in container
+    // Open terminal in container (render-critical addons loaded above)
     xterm.open(containerRef.current);
     fitAddon.fit();
+
+    // Defer non-critical addons until after first paint so the terminal
+    // is visible sooner. These addons add features (links, images,
+    // clipboard sync, search) but aren't needed for initial rendering.
+    requestAnimationFrame(() => {
+      // Load WebLinksAddon for clickable URLs (including file:// links)
+      try {
+        const urlRegex = /(?:https?|file):\/\/[^\s`'"()<>\[\]]+/;
+
+        const webLinksAddon = new WebLinksAddon((event, uri) => {
+          event.preventDefault();
+
+          if (uri.startsWith('file://')) {
+            const filePath = uri.slice(7);
+            const isDiff = event.shiftKey;
+            if (onFileLinkRef.current) {
+              onFileLinkRef.current(filePath, isDiff);
+            }
+          } else {
+            window.terminalAPI.openExternal(uri).catch(console.error);
+          }
+        }, {
+          urlRegex,
+        });
+        xterm.loadAddon(webLinksAddon);
+        webLinksAddonRef.current = webLinksAddon;
+      } catch (e) {
+        console.warn("WebLinks addon not available:", e);
+      }
+
+      // Load ImageAddon for SIXEL and iTerm2 IIP (OSC 1337) inline images
+      try {
+        const imageAddon = new ImageAddon({
+          enableSizeReports: true,
+          pixelLimit: 16777216,
+          storageLimit: 128,
+          showPlaceholder: true,
+          sixelSupport: true,
+          sixelScrolling: true,
+        });
+        xterm.loadAddon(imageAddon);
+        imageAddonRef.current = imageAddon;
+      } catch (e) {
+        console.warn("Image addon not available:", e);
+      }
+
+      // Load ClipboardAddon for OSC 52 clipboard sync (zellij, tmux, vim over SSH)
+      try {
+        const clipboardAddon = new ClipboardAddon();
+        xterm.loadAddon(clipboardAddon);
+        clipboardAddonRef.current = clipboardAddon;
+      } catch (e) {
+        console.warn("Clipboard addon not available:", e);
+      }
+
+      // Load SearchAddon for find functionality (Cmd/Ctrl+F)
+      try {
+        const searchAddon = new SearchAddon();
+        xterm.loadAddon(searchAddon);
+        searchAddonRef.current = searchAddon;
+      } catch (e) {
+        console.warn("Search addon not available:", e);
+      }
+    });
 
     // Store refs
     xtermRef.current = xterm;

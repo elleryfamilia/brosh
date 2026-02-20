@@ -12,24 +12,31 @@ import type { SandboxController } from "../sandbox/index.js";
 /**
  * Get system locale like Hyper does.
  * On macOS, reads from defaults. On Linux, checks environment.
+ * Result is cached at module level so the execSync only runs once.
  */
-function getSystemLocale(): string {
+let cachedSystemLocale: string | null = null;
+
+export function getSystemLocale(): string {
+  if (cachedSystemLocale !== null) return cachedSystemLocale;
+
   // Check if already set to UTF-8
   const lang = process.env.LANG || "";
   if (lang.toLowerCase().includes("utf-8") || lang.toLowerCase().includes("utf8")) {
+    cachedSystemLocale = lang;
     return lang;
   }
 
   try {
     if (process.platform === "darwin") {
-      // macOS: read from system preferences
+      // macOS: read from system preferences (no user input, safe static command)
       const output = execSync("defaults read -g AppleLocale 2>/dev/null", {
         encoding: "utf8",
         timeout: 1000,
       }).trim();
       if (output) {
         // Convert format: en_US -> en_US.UTF-8
-        return `${output.replace(/-/g, "_")}.UTF-8`;
+        cachedSystemLocale = `${output.replace(/-/g, "_")}.UTF-8`;
+        return cachedSystemLocale;
       }
     }
   } catch {
@@ -37,11 +44,199 @@ function getSystemLocale(): string {
   }
 
   // Default to en_US.UTF-8
-  return "en_US.UTF-8";
+  cachedSystemLocale = "en_US.UTF-8";
+  return cachedSystemLocale;
 }
 
 // Custom prompt indicator for brosh (nf-md-palm_tree from Nerd Fonts, U+F1055)
 const PROMPT_INDICATOR = "\uDB84\uDC55";
+
+// ── Pre-warm caches ──────────────────────────────────────────────────
+// These module-level caches store expensive-to-compute values so that
+// the first TerminalSession.create() after app launch is fast.
+
+/** Cached base env (process.env minus npm_* and optionally LC_*) */
+let cachedBaseEnv: { filterLc: boolean; env: Record<string, string> } | null = null;
+
+function getFilteredBaseEnv(filterLcVars: boolean): Record<string, string> {
+  if (cachedBaseEnv && cachedBaseEnv.filterLc === filterLcVars) {
+    return { ...cachedBaseEnv.env };
+  }
+  const baseEnv: Record<string, string> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (filterLcVars && key.startsWith("LC_")) continue;
+    if (key.startsWith("npm_")) continue;
+    if (value !== undefined) baseEnv[key] = value;
+  }
+  cachedBaseEnv = { filterLc: filterLcVars, env: baseEnv };
+  return { ...baseEnv };
+}
+
+/** Pre-warmed zsh ZDOTDIR path (written once, reused across sessions) */
+let preWarmedZdotdir: string | null = null;
+/** Pre-warmed bash rcfile path */
+let preWarmedBashRc: string | null = null;
+
+/**
+ * Pre-write shell RC files to a stable temp path so initialize() can skip
+ * the synchronous fs.writeFileSync calls on the hot path.
+ */
+function preWarmRcFiles(): void {
+  const defaultShell = path.basename(getDefaultShell());
+
+  if (defaultShell === "zsh" && !preWarmedZdotdir) {
+    const userZdotdir = process.env.ZDOTDIR || os.homedir();
+    const zdotdir = path.join(os.tmpdir(), `brosh-zsh-${process.pid}`);
+    fs.mkdirSync(zdotdir, { recursive: true });
+
+    // .zshenv
+    fs.writeFileSync(path.join(zdotdir, ".zshenv"),
+      `typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"\n` +
+      `export ZDOTDIR="${userZdotdir}"\n` +
+      `HISTFILE="${userZdotdir}/.zsh_history"\n` +
+      `[[ -f "${userZdotdir}/.zshenv" ]] && source "${userZdotdir}/.zshenv"\n` +
+      `export ZDOTDIR="$__BROSH_WRAPPER_ZDOTDIR"\n` +
+      `unset __BROSH_WRAPPER_ZDOTDIR\n` +
+      `[[ -z "$HISTFILE" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
+      `[[ "$HISTFILE" == "$ZDOTDIR/.zsh_history" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n`);
+
+    // .zprofile
+    fs.writeFileSync(path.join(zdotdir, ".zprofile"),
+      `typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"\n` +
+      `export ZDOTDIR="${userZdotdir}"\n` +
+      `[[ -f "${userZdotdir}/.zprofile" ]] && source "${userZdotdir}/.zprofile"\n` +
+      `export ZDOTDIR="$__BROSH_WRAPPER_ZDOTDIR"\n` +
+      `unset __BROSH_WRAPPER_ZDOTDIR\n` +
+      `[[ -z "$HISTFILE" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
+      `[[ "$HISTFILE" == "$ZDOTDIR/.zsh_history" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n`);
+
+    // .zshrc
+    const zshrcContent = `
+# Keep wrapper ZDOTDIR so brosh startup files still run.
+typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"
+
+# Make user config see the real ZDOTDIR.
+# Many zsh configs derive HISTFILE from ZDOTDIR.
+export ZDOTDIR="${userZdotdir}"
+[[ -f "${userZdotdir}/.zshrc" ]] && source "${userZdotdir}/.zshrc"
+
+# Restore wrapper ZDOTDIR for the remainder of startup.
+export ZDOTDIR="$__BROSH_WRAPPER_ZDOTDIR"
+unset __BROSH_WRAPPER_ZDOTDIR
+
+# If user config left HISTFILE empty or pointing to wrapper temp ZDOTDIR,
+# reset it to the user's default history file.
+[[ -z "$HISTFILE" ]] && HISTFILE="${userZdotdir}/.zsh_history"
+[[ "$HISTFILE" == "$ZDOTDIR/.zsh_history" ]] && HISTFILE="${userZdotdir}/.zsh_history"
+
+# HISTFILE is set in .zshenv (before zsh initializes history).
+# Set size defaults here; user's .zshrc can override.
+: \${HISTSIZE:=50000}
+: \${SAVEHIST:=10000}
+
+# OSC 133 shell integration (command marks for error detection)
+# A = prompt start, C = output start, D;exitcode = command finished
+# Uses add-zsh-hook so it doesn't interfere with user's hooks
+__brosh_cmd_executed=""
+__brosh_precmd() {
+  local exit_code=$?
+  if [[ -n "$__brosh_cmd_executed" ]]; then
+    printf '\\e]133;D;%d\\a' "$exit_code"
+  fi
+  __brosh_cmd_executed=""
+  printf '\\e]133;A\\a'
+}
+__brosh_preexec() {
+  __brosh_cmd_executed=1
+  printf '\\e]133;C\\a'
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook precmd __brosh_precmd
+add-zsh-hook preexec __brosh_preexec
+`;
+    fs.writeFileSync(path.join(zdotdir, ".zshrc"), zshrcContent);
+
+    // .zlogin
+    fs.writeFileSync(path.join(zdotdir, ".zlogin"),
+      `typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"\n` +
+      `export ZDOTDIR="${userZdotdir}"\n` +
+      `[[ -f "${userZdotdir}/.zlogin" ]] && source "${userZdotdir}/.zlogin"\n` +
+      `export ZDOTDIR="$__BROSH_WRAPPER_ZDOTDIR"\n` +
+      `unset __BROSH_WRAPPER_ZDOTDIR\n` +
+      `[[ -z "$HISTFILE" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
+      `[[ "$HISTFILE" == "$ZDOTDIR/.zsh_history" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
+      `[[ -s "\$HISTFILE" ]] && fc -R "\$HISTFILE"\n` +
+      `export ZDOTDIR="${userZdotdir}"\n`);
+
+    preWarmedZdotdir = zdotdir;
+  }
+
+  if ((defaultShell === "bash" || defaultShell === "sh") && !preWarmedBashRc) {
+    const homeDir = os.homedir();
+    const bashRcContent = `
+# Source user's login profile for PATH, aliases, etc.
+[ -f "${homeDir}/.bash_profile" ] && source "${homeDir}/.bash_profile" || {
+  [ -f "${homeDir}/.bash_login" ] && source "${homeDir}/.bash_login" || {
+    [ -f "${homeDir}/.profile" ] && source "${homeDir}/.profile"
+  }
+}
+# Source .bashrc if not already sourced by the profile above
+[ -f "${homeDir}/.bashrc" ] && source "${homeDir}/.bashrc"
+
+# Emit OSC 7 (current working directory) on every prompt
+# This lets the terminal track cwd changes for status bar badges
+__brosh_osc7() {
+  printf '\\e]7;file://%s%s\\e\\\\' "$HOSTNAME" "$PWD"
+}
+
+# OSC 133 shell integration (command marks for error detection)
+# A = prompt start, C = output start, D;exitcode = command finished
+__brosh_cmd_executed=""
+__brosh_precmd() {
+  local __brosh_exit=$?
+  if [[ -n "$__brosh_cmd_executed" ]]; then
+    printf '\\e]133;D;%d\\a' "$__brosh_exit"
+    __brosh_cmd_executed=""
+  fi
+  printf '\\e]133;A\\a'
+}
+PROMPT_COMMAND="__brosh_precmd;__brosh_osc7\${PROMPT_COMMAND:+;\\$PROMPT_COMMAND}"
+
+# DEBUG trap for preexec (marks output start when command begins executing)
+trap '
+  if [[ -z "$__brosh_cmd_executed" && "$BASH_COMMAND" != "__brosh_precmd" && "$BASH_COMMAND" != "__brosh_osc7" ]]; then
+    __brosh_cmd_executed=1
+    printf '"'"'\\e]133;C\\a'"'"'
+  fi
+' DEBUG
+`;
+    const rcPath = path.join(os.tmpdir(), `brosh-bashrc-${process.pid}`);
+    fs.writeFileSync(rcPath, bashRcContent);
+    preWarmedBashRc = rcPath;
+  }
+}
+
+/**
+ * Pre-warm terminal session resources (locale, RC files, env filtering).
+ * Call this early (e.g. while the mode selection modal is visible) so the
+ * first createSession() is fast.
+ */
+export function preWarmSession(options?: { nativeShell?: boolean; setLocaleEnv?: boolean }): void {
+  const nativeShell = options?.nativeShell ?? true;
+  const setLocaleEnv = options?.setLocaleEnv ?? false;
+
+  // Trigger locale cache (may execSync "defaults read")
+  getSystemLocale();
+
+  // Pre-write RC files for the default shell
+  if (nativeShell) {
+    preWarmRcFiles();
+  }
+
+  // Pre-filter env vars
+  const filterLc = nativeShell && !setLocaleEnv;
+  getFilteredBaseEnv(filterLc);
+}
 
 export interface TerminalSessionOptions {
   cols?: number;
@@ -363,8 +558,13 @@ ${bannerCmd}
       if (shellName === "bash" || shellName === "sh") {
         // Bash: use --rcfile with a temp file that sources the user's profile,
         // injects OSC 7 (cwd reporting) and OSC 133 (command marks for error detection)
-        const homeDir = os.homedir();
-        const bashRcContent = `
+        if (preWarmedBashRc && fs.existsSync(preWarmedBashRc)) {
+          // Reuse pre-warmed RC file
+          this.rcFile = preWarmedBashRc;
+          preWarmedBashRc = null; // consumed — next session will write fresh
+        } else {
+          const homeDir = os.homedir();
+          const bashRcContent = `
 # Source user's login profile for PATH, aliases, etc.
 [ -f "${homeDir}/.bash_profile" ] && source "${homeDir}/.bash_profile" || {
   [ -f "${homeDir}/.bash_login" ] && source "${homeDir}/.bash_login" || {
@@ -401,44 +601,47 @@ trap '
   fi
 ' DEBUG
 `;
-        this.rcFile = path.join(os.tmpdir(), `brosh-bashrc-${process.pid}-${Date.now()}`);
-        fs.writeFileSync(this.rcFile, bashRcContent);
-        args = ["--rcfile", this.rcFile];
+          this.rcFile = path.join(os.tmpdir(), `brosh-bashrc-${process.pid}`);
+          fs.writeFileSync(this.rcFile, bashRcContent);
+        }
+        args = ["--rcfile", this.rcFile!];
       } else if (shellName === "zsh") {
         // Zsh: create ZDOTDIR wrapper that sources user's config and adds
         // OSC 133 shell integration hooks (non-destructive via add-zsh-hook)
-        const userZdotdir = process.env.ZDOTDIR || os.homedir();
-        this.zdotdir = path.join(os.tmpdir(), `brosh-zsh-${process.pid}-${Date.now()}`);
-        fs.mkdirSync(this.zdotdir, { recursive: true });
-        console.log(`[session] Created ZDOTDIR: ${this.zdotdir}, user ZDOTDIR: ${userZdotdir}`);
+        if (preWarmedZdotdir && fs.existsSync(preWarmedZdotdir)) {
+          // Reuse pre-warmed ZDOTDIR
+          this.zdotdir = preWarmedZdotdir;
+          preWarmedZdotdir = null; // consumed — next session will write fresh
+          console.log(`[session] Reusing pre-warmed ZDOTDIR: ${this.zdotdir}`);
+        } else {
+          const userZdotdir = process.env.ZDOTDIR || os.homedir();
+          this.zdotdir = path.join(os.tmpdir(), `brosh-zsh-${process.pid}`);
+          fs.mkdirSync(this.zdotdir, { recursive: true });
+          console.log(`[session] Created ZDOTDIR: ${this.zdotdir}, user ZDOTDIR: ${userZdotdir}`);
 
-        // .zshenv - runs for all zsh invocations (earliest rc file)
-        // Set HISTFILE here before zsh initializes history. Since ZDOTDIR is a
-        // temp dir, zsh's default HISTFILE ($ZDOTDIR/.zsh_history) would point
-        // to a nonexistent file. Must be set before user's .zshenv in case they
-        // rely on the default.
-        fs.writeFileSync(path.join(this.zdotdir, ".zshenv"),
-          `typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"\n` +
-          `export ZDOTDIR="${userZdotdir}"\n` +
-          `HISTFILE="${userZdotdir}/.zsh_history"\n` +
-          `[[ -f "${userZdotdir}/.zshenv" ]] && source "${userZdotdir}/.zshenv"\n` +
-          `export ZDOTDIR="$__BROSH_WRAPPER_ZDOTDIR"\n` +
-          `unset __BROSH_WRAPPER_ZDOTDIR\n` +
-          `[[ -z "$HISTFILE" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
-          `[[ "$HISTFILE" == "$ZDOTDIR/.zsh_history" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n`);
+          // .zshenv - runs for all zsh invocations (earliest rc file)
+          fs.writeFileSync(path.join(this.zdotdir, ".zshenv"),
+            `typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"\n` +
+            `export ZDOTDIR="${userZdotdir}"\n` +
+            `HISTFILE="${userZdotdir}/.zsh_history"\n` +
+            `[[ -f "${userZdotdir}/.zshenv" ]] && source "${userZdotdir}/.zshenv"\n` +
+            `export ZDOTDIR="$__BROSH_WRAPPER_ZDOTDIR"\n` +
+            `unset __BROSH_WRAPPER_ZDOTDIR\n` +
+            `[[ -z "$HISTFILE" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
+            `[[ "$HISTFILE" == "$ZDOTDIR/.zsh_history" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n`);
 
-        // .zprofile - runs for login shells (before .zshrc)
-        fs.writeFileSync(path.join(this.zdotdir, ".zprofile"),
-          `typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"\n` +
-          `export ZDOTDIR="${userZdotdir}"\n` +
-          `[[ -f "${userZdotdir}/.zprofile" ]] && source "${userZdotdir}/.zprofile"\n` +
-          `export ZDOTDIR="$__BROSH_WRAPPER_ZDOTDIR"\n` +
-          `unset __BROSH_WRAPPER_ZDOTDIR\n` +
-          `[[ -z "$HISTFILE" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
-          `[[ "$HISTFILE" == "$ZDOTDIR/.zsh_history" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n`);
+          // .zprofile - runs for login shells (before .zshrc)
+          fs.writeFileSync(path.join(this.zdotdir, ".zprofile"),
+            `typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"\n` +
+            `export ZDOTDIR="${userZdotdir}"\n` +
+            `[[ -f "${userZdotdir}/.zprofile" ]] && source "${userZdotdir}/.zprofile"\n` +
+            `export ZDOTDIR="$__BROSH_WRAPPER_ZDOTDIR"\n` +
+            `unset __BROSH_WRAPPER_ZDOTDIR\n` +
+            `[[ -z "$HISTFILE" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
+            `[[ "$HISTFILE" == "$ZDOTDIR/.zsh_history" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n`);
 
-        // .zshrc - runs for interactive shells
-        const zshrcContent = `
+          // .zshrc - runs for interactive shells
+          const zshrcContent = `
 # Keep wrapper ZDOTDIR so brosh startup files still run.
 typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"
 
@@ -481,22 +684,22 @@ autoload -Uz add-zsh-hook
 add-zsh-hook precmd __brosh_precmd
 add-zsh-hook preexec __brosh_preexec
 `;
-        fs.writeFileSync(path.join(this.zdotdir, ".zshrc"), zshrcContent);
+          fs.writeFileSync(path.join(this.zdotdir, ".zshrc"), zshrcContent);
 
-        // .zlogin - runs for login shells (after .zshrc) — last rc file
-        // Force-read history here, after restoring the user's ZDOTDIR context.
-        fs.writeFileSync(path.join(this.zdotdir, ".zlogin"),
-          `typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"\n` +
-          `export ZDOTDIR="${userZdotdir}"\n` +
-          `[[ -f "${userZdotdir}/.zlogin" ]] && source "${userZdotdir}/.zlogin"\n` +
-          `export ZDOTDIR="$__BROSH_WRAPPER_ZDOTDIR"\n` +
-          `unset __BROSH_WRAPPER_ZDOTDIR\n` +
-          `[[ -z "$HISTFILE" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
-          `[[ "$HISTFILE" == "$ZDOTDIR/.zsh_history" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
-          `[[ -s "\$HISTFILE" ]] && fc -R "\$HISTFILE"\n` +
-          // Keep runtime ZDOTDIR on the user's path so prompt hooks/plugins
-          // that derive HISTFILE from ZDOTDIR don't switch back to wrapper temp dir.
-          `export ZDOTDIR="${userZdotdir}"\n`);
+          // .zlogin - runs for login shells (after .zshrc) — last rc file
+          fs.writeFileSync(path.join(this.zdotdir, ".zlogin"),
+            `typeset -g __BROSH_WRAPPER_ZDOTDIR="$ZDOTDIR"\n` +
+            `export ZDOTDIR="${userZdotdir}"\n` +
+            `[[ -f "${userZdotdir}/.zlogin" ]] && source "${userZdotdir}/.zlogin"\n` +
+            `export ZDOTDIR="$__BROSH_WRAPPER_ZDOTDIR"\n` +
+            `unset __BROSH_WRAPPER_ZDOTDIR\n` +
+            `[[ -z "$HISTFILE" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
+            `[[ "$HISTFILE" == "$ZDOTDIR/.zsh_history" ]] && HISTFILE="${userZdotdir}/.zsh_history"\n` +
+            `[[ -s "\$HISTFILE" ]] && fc -R "\$HISTFILE"\n` +
+            // Keep runtime ZDOTDIR on the user's path so prompt hooks/plugins
+            // that derive HISTFILE from ZDOTDIR don't switch back to wrapper temp dir.
+            `export ZDOTDIR="${userZdotdir}"\n`);
+        }
 
         env.ZDOTDIR = this.zdotdir;
         args = ["--login"];
@@ -541,22 +744,8 @@ add-zsh-hook preexec __brosh_preexec
     // SSH forwarding issues (SSH's SendEnv LC_* forwards these to remote servers
     // that may not have the same locales). We set LANG which is sufficient for
     // local UTF-8 support - the shell derives other locale settings from LANG.
-    const baseEnv: Record<string, string> = {};
-    const filterLcVars = options.nativeShell && !options.setLocaleEnv;
-    for (const [key, value] of Object.entries(process.env)) {
-      // Skip LC_* variables when filtering is enabled
-      if (filterLcVars && key.startsWith("LC_")) {
-        continue;
-      }
-      // Strip npm internal variables — these leak from Electron's parent process
-      // (npm run dev/start) and break tools like nvm that check npm_config_prefix
-      if (key.startsWith("npm_")) {
-        continue;
-      }
-      if (value !== undefined) {
-        baseEnv[key] = value;
-      }
-    }
+    const filterLcVars = !!(options.nativeShell && !options.setLocaleEnv);
+    const baseEnv = getFilteredBaseEnv(filterLcVars);
 
     // Spawn PTY process
     this.ptyProcess = pty.spawn(spawnCmd, spawnArgs, {
