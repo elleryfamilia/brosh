@@ -59,7 +59,7 @@ if (!app.isPackaged) {
 app.setAboutPanelOptions({
   applicationName: "brosh",
   applicationVersion: app.isPackaged ? appVersion : `${appVersion}-dev`,
-  copyright: "Copyright © 2025 Ellery Familia",
+  copyright: `Copyright © ${new Date().getFullYear()} Ellery Familia`,
   website: "https://github.com/elleryfamilia/brosh",
 });
 

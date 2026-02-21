@@ -8,12 +8,30 @@
  */
 
 import { app, shell, ipcMain } from "electron";
+import { readFileSync } from "fs";
+import { join } from "path";
 import electronUpdater from "electron-updater";
 import type { UpdateInfo, ProgressInfo } from "electron-updater";
 
 const { autoUpdater } = electronUpdater;
 import type { WindowManager } from "./window-manager.js";
 import { getSettings } from "./settings-store.js";
+
+/**
+ * Detect local (non-release) builds.
+ * electron-builder's -c.extraMetadata.localBuild=true embeds the flag
+ * in the packaged app's package.json. CI/release builds don't set it.
+ */
+function isLocalBuild(): boolean {
+  try {
+    const pkg = JSON.parse(
+      readFileSync(join(app.getAppPath(), "package.json"), "utf8")
+    );
+    return pkg.localBuild === true || pkg.localBuild === "true";
+  } catch {
+    return false;
+  }
+}
 
 // Update status types
 export type UpdateState =
@@ -70,6 +88,13 @@ function broadcastStatus(status: UpdateStatus): void {
  */
 export function initAutoUpdater(wm: WindowManager): void {
   windowManager = wm;
+
+  // Skip auto-updates for local builds (npm run package:mac, etc.)
+  // Only GitHub-released builds should check for updates.
+  if (isLocalBuild()) {
+    console.log("[auto-updater] Local build detected, skipping auto-updates");
+    return;
+  }
 
   // Configure autoUpdater
   autoUpdater.autoDownload = false;
