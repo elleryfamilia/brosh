@@ -7,15 +7,11 @@
 
 import { app, BrowserWindow, type WebContents } from "electron";
 import * as path from "path";
-import { fileURLToPath } from "url";
 import { TerminalBridge } from "./terminal-bridge.js";
 import { McpServer } from "./mcp-server.js";
 import { IdeProtocolServer } from "./ide-protocol.js";
 import { getWindowState, trackWindowState } from "./window-state.js";
 import { getSettings } from "./settings-store.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Development mode check
 const isDev = process.env.ELECTRON_DEV === "true";

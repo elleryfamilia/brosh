@@ -13,11 +13,6 @@
 
 import { app } from "electron";
 import path from "path";
-import { fileURLToPath } from "url";
-
-// ESM equivalent of __dirname
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 // Dynamic import to handle ESM/CommonJS issues in Electron
 let pipeline: typeof import("@huggingface/transformers").pipeline | null = null;
