@@ -52,10 +52,20 @@ function formatMB(bytes) {
   return (bytes / 1024 / 1024).toFixed(1) + "MB";
 }
 
-function stripOnnxruntimeNode(resourcesDir, platform, arch) {
+// With asar: false, modules are at app/node_modules/ instead of app.asar.unpacked/node_modules/
+function getNodeModulesDir(resourcesDir) {
+  // Try asar-unpacked path first (asar: true), then loose app dir (asar: false)
+  const asarUnpacked = path.join(resourcesDir, "app.asar.unpacked/node_modules");
+  if (fs.existsSync(asarUnpacked)) return asarUnpacked;
+  const loose = path.join(resourcesDir, "app/node_modules");
+  if (fs.existsSync(loose)) return loose;
+  return null;
+}
+
+function stripOnnxruntimeNode(nodeModulesDir, platform, arch) {
   const onnxBinDir = path.join(
-    resourcesDir,
-    "app.asar.unpacked/node_modules/onnxruntime-node/bin/napi-v3"
+    nodeModulesDir,
+    "onnxruntime-node/bin/napi-v3"
   );
   if (!fs.existsSync(onnxBinDir)) return 0;
 
@@ -85,13 +95,10 @@ function stripOnnxruntimeNode(resourcesDir, platform, arch) {
   return removed;
 }
 
-function stripOnnxruntimeWeb(resourcesDir) {
+function stripOnnxruntimeWeb(nodeModulesDir) {
   // onnxruntime-web is only needed for browser/WASM contexts.
   // We use onnxruntime-node for main process ML inference, so this is dead weight.
-  const loc = path.join(
-    resourcesDir,
-    "app.asar.unpacked/node_modules/onnxruntime-web"
-  );
+  const loc = path.join(nodeModulesDir, "onnxruntime-web");
   const size = dirSize(loc);
   if (rmSyncSafe(loc)) {
     console.log(`    removed onnxruntime-web (${formatMB(size)})`);
@@ -100,19 +107,15 @@ function stripOnnxruntimeWeb(resourcesDir) {
   return 0;
 }
 
-function stripSharpPlatformModules(resourcesDir, platform, arch) {
-  const unpackedModules = path.join(
-    resourcesDir,
-    "app.asar.unpacked/node_modules"
-  );
-  if (!fs.existsSync(unpackedModules)) return 0;
+function stripSharpPlatformModules(nodeModulesDir, platform, arch) {
+  if (!fs.existsSync(nodeModulesDir)) return 0;
 
   const targetSuffix = `${platform}-${arch}`;
   let removed = 0;
 
-  for (const dir of fs.readdirSync(unpackedModules)) {
+  for (const dir of fs.readdirSync(nodeModulesDir)) {
     if (!dir.startsWith("@img")) continue;
-    const imgDir = path.join(unpackedModules, dir);
+    const imgDir = path.join(nodeModulesDir, dir);
     if (!fs.statSync(imgDir).isDirectory()) continue;
     for (const sub of fs.readdirSync(imgDir)) {
       const subPath = path.join(imgDir, sub);
@@ -137,11 +140,18 @@ exports.default = async function afterPack(context) {
   console.log(`\n  afterPack: stripping binaries for ${platform}/${arch}`);
   console.log(`  afterPack: resources at ${resourcesDir}`);
 
+  const nodeModulesDir = getNodeModulesDir(resourcesDir);
+  if (!nodeModulesDir) {
+    console.log(`  afterPack: no node_modules found, skipping`);
+    return;
+  }
+  console.log(`  afterPack: node_modules at ${nodeModulesDir}`);
+
   let totalSaved = 0;
 
-  totalSaved += stripOnnxruntimeNode(resourcesDir, platform, arch);
-  totalSaved += stripOnnxruntimeWeb(resourcesDir);
-  totalSaved += stripSharpPlatformModules(resourcesDir, platform, arch);
+  totalSaved += stripOnnxruntimeNode(nodeModulesDir, platform, arch);
+  totalSaved += stripOnnxruntimeWeb(nodeModulesDir);
+  totalSaved += stripSharpPlatformModules(nodeModulesDir, platform, arch);
 
   console.log(`  afterPack: total saved ${formatMB(totalSaved)}\n`);
 };

@@ -10,6 +10,13 @@
  * - IPC handlers: Registered once at app level, dispatch to appropriate bridge
  */
 
+// Startup timing — measure before any imports
+const _t0 = performance.now();
+const _startupTimings: Array<[string, number]> = [];
+const _mark = (label: string) => {
+  _startupTimings.push([label, performance.now() - _t0]);
+};
+
 import os from "os";
 import path from "path";
 import fs from "fs";
@@ -39,6 +46,8 @@ import {
 } from "./analytics.js";
 import { detectClaudeCode } from "./ai-cli.js";
 import Store from "electron-store";
+
+_mark("imports done");
 
 // Set app name for menu bar (productName in build config only applies when packaged)
 app.setName("brosh");
@@ -1725,7 +1734,10 @@ app.on("child-process-gone", (_event, details) => {
 });
 
 // App lifecycle
+_mark("module init done");
+
 app.whenReady().then(async () => {
+  _mark("app.whenReady()");
   // On Linux, prepend bundled sandbox binaries (socat, bwrap) to PATH so that
   // @anthropic-ai/sandbox-runtime can find them without requiring system install.
   if (process.platform === "linux") {
@@ -1756,12 +1768,21 @@ app.whenReady().then(async () => {
 
   // Register all IPC handlers once at app startup
   registerIpcHandlers(windowManager);
+  _mark("IPC handlers registered");
 
   // Set up application menu (uses WindowManager for "New Window" and routing)
   createMenu(windowManager);
 
   // Create the first window
   await windowManager.createWindow();
+  _mark("first window created");
+
+  // Log startup timings
+  console.log("\n[startup] Timing breakdown:");
+  for (const [label, ms] of _startupTimings) {
+    console.log(`  ${ms.toFixed(0).padStart(6)}ms  ${label}`);
+  }
+  console.log();
 
   // Initialize auto-updater (only in packaged builds)
   if (app.isPackaged) {
