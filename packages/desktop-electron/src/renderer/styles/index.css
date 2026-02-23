@@ -3947,7 +3947,7 @@ body,
 }
 
 .toast {
-  background: var(--surface-2);
+  background: var(--surface-1);
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px 16px;
@@ -4018,7 +4018,7 @@ body,
 
 .toast-btn-dismiss {
   background: transparent;
-  color: #888;
+  color: var(--fg-secondary);
   font-size: 16px;
   padding: 2px 6px;
 }
@@ -6467,6 +6467,11 @@ body,
 .diff-change-modal-remember input[type="checkbox"] {
   margin: 0;
   cursor: pointer;
+}
+
+/* Suppress slide-in animation when re-showing a sidebar panel */
+.sidebar-no-anim *  {
+  animation: none !important;
 }
 
 /* ==================== Git Sidebar ==================== */

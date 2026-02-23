@@ -87,6 +87,8 @@ function applyTheme(theme: Theme): void {
   // Base colors
   root.style.setProperty('--bg-primary', colors.background);
   root.style.setProperty('--fg-primary', colors.foreground);
+  // Secondary foreground: blend foreground toward background for muted text
+  root.style.setProperty('--fg-secondary', `color-mix(in srgb, ${colors.foreground} 60%, ${colors.background})`);
 
   // Use theme's explicit foreground if provided, otherwise auto-calculate
   const accentForeground = colors.accentForeground

@@ -27,18 +27,15 @@ interface SidebarHostProps {
   onWidthChange: (width: number) => void;
 }
 
-function getStoredWidth(pluginId: string, defaultWidth: number, minWidth: number, maxWidth: number): number {
-  const stored = localStorage.getItem(`sidebar:${pluginId}:width`);
-  if (!stored) return defaultWidth;
+function getStoredSharedWidth(): number | null {
+  const stored = localStorage.getItem('sidebar:width');
+  if (!stored) return null;
   const parsed = parseInt(stored, 10);
-  if (isNaN(parsed)) return defaultWidth;
-  return Math.max(minWidth, Math.min(maxWidth, parsed));
+  return isNaN(parsed) ? null : parsed;
 }
 
-function getPluginStoredWidth(pluginId: string) {
-  const p = getPlugin(pluginId);
-  if (!p) return 0;
-  return getStoredWidth(pluginId, p.definition.defaultWidth, p.definition.minWidth, p.definition.maxWidth);
+function clampToPlugin(width: number, minWidth: number, maxWidth: number): number {
+  return Math.max(minWidth, Math.min(maxWidth, width));
 }
 
 export function SidebarHost({
@@ -59,13 +56,14 @@ export function SidebarHost({
     }
   }, [activePluginId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Per-plugin width state
-  const [widths, setWidths] = useState<Record<string, number>>({});
+  // Single shared sidebar width
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    return getStoredSharedWidth() ?? 280;
+  });
 
   const activePlugin = activePluginId ? getPlugin(activePluginId) : undefined;
   const activeWidth = activePlugin
-    ? widths[activePlugin.definition.id] ??
-      getStoredWidth(activePlugin.definition.id, activePlugin.definition.defaultWidth, activePlugin.definition.minWidth, activePlugin.definition.maxWidth)
+    ? clampToPlugin(sidebarWidth, activePlugin.definition.minWidth, activePlugin.definition.maxWidth)
     : 0;
 
   // Report width whenever active plugin changes or width changes
@@ -81,20 +79,19 @@ export function SidebarHost({
     }
   }, [activePluginId, activePlugin, activeWidth, onWidthChange]);
 
-  // Stable per-plugin resize handlers (cached in a ref)
-  const resizeHandlersRef = useRef<Record<string, (w: number) => void>>({});
-  function getResizeHandler(pluginId: string): (w: number) => void {
-    if (!resizeHandlersRef.current[pluginId]) {
-      resizeHandlersRef.current[pluginId] = (newWidth: number) => {
-        const p = getPlugin(pluginId);
-        if (!p) return;
-        const { minWidth, maxWidth, id } = p.definition;
-        const clamped = Math.max(minWidth, Math.min(maxWidth, newWidth));
-        setWidths((prev) => ({ ...prev, [id]: clamped }));
-        localStorage.setItem(`sidebar:${id}:width`, String(clamped));
-      };
-    }
-    return resizeHandlersRef.current[pluginId];
+  // Shared resize handler — updates the single sidebar width, clamped to active plugin
+  const resizeHandlerRef = useRef<(w: number) => void>();
+  // Recreate when active plugin changes so clamping uses the right constraints
+  const activeDefRef = useRef(activePlugin?.definition);
+  activeDefRef.current = activePlugin?.definition;
+  if (!resizeHandlerRef.current) {
+    resizeHandlerRef.current = (newWidth: number) => {
+      const def = activeDefRef.current;
+      if (!def) return;
+      const clamped = clampToPlugin(newWidth, def.minWidth, def.maxWidth);
+      setSidebarWidth(clamped);
+      localStorage.setItem('sidebar:width', String(clamped));
+    };
   }
 
   // Two stable context objects — one for active, one for inactive.
@@ -121,6 +118,21 @@ export function SidebarHost({
     [workspace, onOpenFile, onCloseEditor, editorFilePath]
   );
 
+  // Track panels that have completed their initial slide-in animation.
+  // When re-showing a panel (display:none → visible), CSS animations replay.
+  // We suppress this by adding a class that overrides animation to 'none'.
+  const shownOnceRef = useRef<Set<string>>(new Set());
+  // After each render where a panel becomes active, mark it as shown
+  useEffect(() => {
+    if (activePluginId) {
+      // Use a microtask so the first render (with animation) completes before marking
+      const raf = requestAnimationFrame(() => {
+        shownOnceRef.current.add(activePluginId);
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [activePluginId]);
+
   if (visitedIds.length === 0) return null;
 
   return (
@@ -131,14 +143,21 @@ export function SidebarHost({
 
         const isActive = id === activePluginId;
         const Panel = plugin.Panel;
-        const w = widths[id] ?? getPluginStoredWidth(id);
+        const { minWidth, maxWidth } = plugin.definition;
+        const w = clampToPlugin(sidebarWidth, minWidth, maxWidth);
+        // Suppress slide-in on re-show: panel was shown before and is becoming active again
+        const suppressAnim = shownOnceRef.current.has(id);
 
         return (
-          <div key={id} style={isActive ? undefined : { display: 'none' }}>
+          <div
+            key={id}
+            style={isActive ? undefined : { display: 'none' }}
+            className={suppressAnim ? 'sidebar-no-anim' : undefined}
+          >
             <Panel
               context={isActive ? activeContext : inactiveContext}
               width={w}
-              onResize={getResizeHandler(id)}
+              onResize={resizeHandlerRef.current!}
               onClose={onClose}
             />
           </div>
@@ -152,10 +171,7 @@ export function SidebarHost({
 export function getPluginWidth(pluginId: string): number {
   const plugin = getPlugin(pluginId);
   if (!plugin) return 0;
-  return getStoredWidth(
-    pluginId,
-    plugin.definition.defaultWidth,
-    plugin.definition.minWidth,
-    plugin.definition.maxWidth,
-  );
+  const shared = getStoredSharedWidth();
+  const base = shared ?? plugin.definition.defaultWidth;
+  return clampToPlugin(base, plugin.definition.minWidth, plugin.definition.maxWidth);
 }
