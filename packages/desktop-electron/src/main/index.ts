@@ -34,6 +34,7 @@ import {
 import {
   hasSeenWelcome,
   markWelcomeSeen,
+  resetWelcomeSeen,
   getAnalyticsEnabled,
   setAnalyticsEnabled,
 } from "./analytics-store.js";
@@ -1755,6 +1756,12 @@ app.whenReady().then(async () => {
     if (typeof macApp.disableSuddenTermination === "function") {
       macApp.disableSuddenTermination();
     }
+  }
+
+  // Dev flag: --reset-welcome to re-trigger onboarding flow
+  if (process.argv.includes("--reset-welcome")) {
+    resetWelcomeSeen();
+    console.log("[main] Welcome state reset via --reset-welcome flag");
   }
 
   // Initialize analytics (consent-aware)

@@ -72,6 +72,13 @@ export function setAnalyticsEnabled(enabled: boolean): void {
 }
 
 /**
+ * Reset the welcome seen flag (for development/testing)
+ */
+export function resetWelcomeSeen(): void {
+  store.set('hasSeenWelcome', false);
+}
+
+/**
  * Get the anonymous distinct ID
  * This is generated once and persisted forever
  */
