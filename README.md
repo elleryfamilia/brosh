@@ -1,5 +1,5 @@
 <p align="center">
-  <strong>The AI-native terminal. Built for Claude coders.</strong>
+  <strong>Built for Claude coders.</strong>
 </p>
 
 <p align="center">

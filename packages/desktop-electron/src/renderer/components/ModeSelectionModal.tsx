@@ -508,7 +508,7 @@ export const ModeSelectionModal: React.FC<ModeSelectionModalProps> = ({
       {showLogo && (
         <div className={`cli-logo-container ${logoVisible ? 'visible' : ''} ${logoFadingOut ? 'fading-out' : ''}`}>
           <img src={broshLogo} alt="brosh" className="cli-logo" />
-          <p className="cli-logo-tagline">The AI-native terminal. Built for Claude coders.</p>
+          <p className="cli-logo-tagline">Built for Claude coders.</p>
         </div>
       )}
       <div className="tui-mode-dialog" tabIndex={-1} ref={dialogRef}>
