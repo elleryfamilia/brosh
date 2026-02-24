@@ -8,35 +8,7 @@
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue" alt="Platforms">
 </p>
 
-## As much or as little as you'd like
-
-brosh gives you a terminal that grows with your workflow. Start minimal, add AI when you need it.
-
-### Choose your sandbox level at launch
-
-Standard or sandboxed -- you pick how much access each session gets.
-
 ![intro screen](docs/images/intro_screen.png)
-
-### Just a terminal
-
-At its simplest, brosh is a fast, themeable terminal with split panes, tabs, and a smart status bar.
-
-![terminal](docs/images/terminal_screen.png)
-
-### Add Claude Code
-
-Open a side-by-side pane and Claude Code is right there -- connected to your terminal over MCP, ready to help.
-
-![claude code](docs/images/claudecode_screen.png)
-
-### Enable context plugins
-
-Turn on the context plugin and Claude can see your project's CLAUDE.md files, documentation, and codebase structure at a glance.
-
-![context plugin](docs/images/context_screen.png)
-
----
 
 ## Install
 
@@ -69,10 +41,34 @@ cd brosh/packages/desktop-electron && npm install && npm run start
 
 **CLI only:** `npm install -g brosh` or `brew install elleryfamilia/brosh/brosh-cli` -- [more install options](./docs/installation.md)
 
+---
+
+## As much or as little as you'd like
+
+brosh gives you a terminal that grows with your workflow. Start minimal, add AI when you need it.
+
+### Just a terminal
+
+At its simplest, brosh is a fast, themeable terminal with split panes, tabs, and a smart status bar.
+
+![terminal](docs/images/terminal_screen.png)
+
+### Add Claude Code
+
+Open a side-by-side pane and Claude Code is right there -- connected to your terminal over MCP, ready to help.
+
+![claude code](docs/images/claudecode_screen.png)
+
+### Plugins when you need them
+
+Git, Context, Plans, Files -- built-in plugins live in the status bar and open as sidebars when you need them. Here the Context plugin gives Claude visibility into your project's CLAUDE.md files, documentation, and codebase structure.
+
+![context plugin](docs/images/context_screen.png)
+
 ## Features
 
 - **Claude Code integration** -- Built-in MCP server, model switching, natural language detection, "Continue in Claude" handoff
-- **Context plugins** -- Give Claude visibility into CLAUDE.md files, project docs, and codebase structure
+- **Built-in plugins** -- Git, Context, Plans, and Files sidebars available when you need them
 - **Split panes & tabs** -- Horizontal/vertical splits with draggable dividers, multi-tab interface
 - **Sandbox mode** -- Restrict filesystem and network access per session
 - **Themes & customization** -- 9 themes, 25+ fonts, cursor styles, window opacity, scrollback
