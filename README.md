@@ -8,7 +8,35 @@
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux-blue" alt="Platforms">
 </p>
 
-![brosh desktop](docs/images/brosh_startscreen.png)
+## As much or as little as you'd like
+
+brosh gives you a terminal that grows with your workflow. Start minimal, add AI when you need it.
+
+### Choose your sandbox level at launch
+
+Standard or sandboxed -- you pick how much access each session gets.
+
+![intro screen](docs/images/intro_screen.png)
+
+### Just a terminal
+
+At its simplest, brosh is a fast, themeable terminal with split panes, tabs, and a smart status bar.
+
+![terminal](docs/images/terminal_screen.png)
+
+### Add Claude Code
+
+Open a side-by-side pane and Claude Code is right there -- connected to your terminal over MCP, ready to help.
+
+![claude code](docs/images/claudecode_screen.png)
+
+### Enable context plugins
+
+Turn on the context plugin and Claude can see your project's CLAUDE.md files, documentation, and codebase structure at a glance.
+
+![context plugin](docs/images/context_screen.png)
+
+---
 
 ## Install
 
@@ -43,62 +71,14 @@ cd brosh/packages/desktop-electron && npm install && npm run start
 
 ## Features
 
-- [**Claude Code integration**](#claude-code-integration) -- Natural language detection, model switching, "Continue in Claude" handoff, built-in MCP server
-- [**Split panes & tabs**](#terminal) -- Horizontal/vertical splits with draggable dividers, multi-tab interface
-- [**Git sidebar**](#git-integration) -- Visual commit graph, file change tracking, Monaco diff editor
-- [**Sandbox mode**](#sandbox-mode) -- Restrict filesystem and network access per session
-- [**Themes & customization**](#terminal) -- 9 themes, 25+ fonts, cursor styles, window opacity, scrollback
-- [**MCP tools**](#mcp-integration) -- Give Claude Code direct access to type, read, and screenshot your terminal
-- [**Session recording**](#developer-tools) -- Record to asciicast format, play back with asciinema
+- **Claude Code integration** -- Built-in MCP server, model switching, natural language detection, "Continue in Claude" handoff
+- **Context plugins** -- Give Claude visibility into CLAUDE.md files, project docs, and codebase structure
+- **Split panes & tabs** -- Horizontal/vertical splits with draggable dividers, multi-tab interface
+- **Sandbox mode** -- Restrict filesystem and network access per session
+- **Themes & customization** -- 9 themes, 25+ fonts, cursor styles, window opacity, scrollback
+- **MCP tools** -- Claude Code can type, read, and screenshot your terminal directly
+- **Session recording** -- Record to asciicast format, play back with asciinema
 - **Cross-platform** -- macOS, Linux
-
----
-
-## Claude Code Integration
-
-brosh is purpose-built for working with Claude Code. Every part of the terminal is designed to make AI-assisted development seamless.
-
-- **Natural language detection** -- An ML classifier distinguishes commands from questions in real time. Type `git push` and it runs. Type `how do I rebase onto main?` and Claude answers.
-- **Model switching** -- Switch between Sonnet, Opus, and Haiku from the status bar.
-- **MCP server built in** -- Claude Code connects over MCP and can see your terminal, run commands, and read output. No extra setup.
-- **Continue in Claude** -- Start a conversation in the terminal and seamlessly continue it in the Claude Code CLI with full context.
-- **Smart status bar** -- Git branch, active Claude model, MCP connection status, and session info at a glance.
-
-![brosh terminal chat](docs/images/terminal_chat.png)
-
-![MCP enabled](docs/images/mcp-enabled2.png)
-
-## Terminal
-
-- Multi-tab interface with split panes (horizontal and vertical)
-- Draggable panel dividers for custom layouts
-- 9 built-in themes and 25+ fonts
-- Cursor style options, window opacity, and configurable scrollback
-- Find bar for searching terminal output
-
-## Git Integration
-
-Built-in git sidebar with visual commit graph, file change tracking, and a Monaco-powered diff editor.
-
-![git sidebar](docs/images/git_sidebar.png)
-
-Click any changed file to open a full diff view:
-
-![git diff view](docs/images/git_sidebar_diff.png)
-
-## Sandbox Mode
-
-Choose between standard and sandboxed terminal sessions at launch. Sandbox mode restricts filesystem and network access so Claude can only touch what you allow.
-
-![sandbox permissions](docs/images/sandbox_selection2.png)
-
-See [docs/sandbox.md](./docs/sandbox.md) for configuration details.
-
-## Developer Tools
-
-- Monaco code editor integration
-- Terminal session recording ([asciicast format](./docs/recording.md))
-- Cross-platform: macOS, Linux
 
 ## MCP Integration
 
