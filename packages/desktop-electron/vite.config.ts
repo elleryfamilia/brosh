@@ -6,6 +6,9 @@ export default defineConfig({
   plugins: [react()],
   base: './',
   root: 'src/renderer',
+  resolve: {
+    preserveSymlinks: true,
+  },
   build: {
     outDir: '../../dist/renderer',
     emptyOutDir: true,
