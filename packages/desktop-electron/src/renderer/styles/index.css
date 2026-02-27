@@ -4761,132 +4761,6 @@ body,
   color: #888;
 }
 
-/* ==================== Error Modal ==================== */
-
-.error-modal__code {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 16px;
-  background: rgba(205, 49, 49, 0.1);
-  border-radius: 6px;
-  margin-bottom: 14px;
-}
-
-.error-modal__code-label {
-  font-size: 11px;
-  color: #888;
-  text-transform: uppercase;
-}
-
-.error-modal__code-value {
-  font-size: 28px;
-  font-weight: 700;
-  color: #ff6b6b;
-  font-family: monospace;
-}
-
-.error-modal__explanation {
-  margin-bottom: 14px;
-}
-
-.error-modal__explanation-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--fg-primary);
-  margin-bottom: 4px;
-}
-
-.error-modal__explanation-desc {
-  font-size: 12px;
-  color: #aaa;
-}
-
-.error-modal__summary,
-.error-modal__command,
-.error-modal__stderr {
-  margin-bottom: 14px;
-}
-
-.error-modal__summary-label {
-  font-size: 11px;
-  color: #888;
-  margin-bottom: 4px;
-}
-
-.error-modal__summary-value {
-  background: var(--surface-0);
-  padding: 8px;
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--fg-primary);
-  border-left: 2px solid #a78bfa;
-}
-
-.error-modal__command-label,
-.error-modal__stderr-label {
-  font-size: 11px;
-  color: #888;
-  margin-bottom: 4px;
-}
-
-.error-modal__command-value {
-  display: block;
-  background: var(--surface-0);
-  padding: 8px;
-  border-radius: 4px;
-  font-family: monospace;
-  font-size: 12px;
-  color: var(--fg-primary);
-}
-
-.error-modal__stderr-value {
-  background: var(--surface-0);
-  padding: 8px;
-  border-radius: 4px;
-  font-family: monospace;
-  font-size: 11px;
-  color: #ff6b6b;
-  max-height: 100px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.error-modal__actions {
-  display: flex;
-  gap: 10px;
-  justify-content: center;
-}
-
-.error-modal__btn {
-  padding: 8px 16px;
-  font-size: 12px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: background-color 0.15s;
-}
-
-.error-modal__btn--primary {
-  background: var(--accent);
-  color: white;
-}
-
-.error-modal__btn--primary:hover {
-  background: var(--accent-hover);
-}
-
-.error-modal__btn--secondary {
-  background: var(--surface-2);
-  color: var(--fg-primary);
-}
-
-.error-modal__btn--secondary:hover {
-  background: var(--border);
-}
-
 /* ==================== Claude Code Panel ==================== */
 
 .claude-panel {
@@ -8060,6 +7934,10 @@ body,
 }
 
 /* Drag-and-drop */
+.files-tree-item--ignored {
+  opacity: 0.5;
+}
+
 .files-tree-item--dragging {
   opacity: 0.4;
 }

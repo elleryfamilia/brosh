@@ -822,6 +822,29 @@ function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
+  ipcMain.handle("git:checkIgnore", async (_event: Electron.IpcMainInvokeEvent, paths: string[]) => {
+    if (paths.length === 0) return { success: true, ignored: [] };
+
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    // Derive cwd from the parent directory of the first path
+    const cwd = paths[0].substring(0, paths[0].lastIndexOf("/"));
+
+    try {
+      const { stdout } = await execFileAsync("git", ["check-ignore", ...paths], {
+        encoding: "utf8",
+        cwd,
+      });
+      const ignored = stdout.trim().split("\n").filter(Boolean);
+      return { success: true, ignored };
+    } catch {
+      // Exit code 1 means none are ignored; 128 means not a git repo — both fine
+      return { success: true, ignored: [] };
+    }
+  });
+
   ipcMain.handle("git:getCommits", async (_event: Electron.IpcMainInvokeEvent, cwd?: string, count?: number) => {
     const { execFile } = await import("child_process");
     const { promisify } = await import("util");
@@ -1667,6 +1690,7 @@ function removeIpcHandlers(): void {
   ipcMain.removeHandler("file:showInFolder");
   ipcMain.removeHandler("git:showFile");
   ipcMain.removeHandler("git:getRoot");
+  ipcMain.removeHandler("git:checkIgnore");
   ipcMain.removeHandler("git:getCommits");
   ipcMain.removeHandler("git:listMarkdownFiles");
   ipcMain.removeHandler("context:discoverMemoryFiles");

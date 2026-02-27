@@ -355,7 +355,7 @@ export function FilesPanel({ context, width, onResize, onClose }: PanelProps) {
     return (
       <div key={entry.path}>
         <button
-          className={`files-tree-item ${isSelected ? 'files-tree-item--selected' : ''} ${entry.isDirectory ? 'files-tree-item--directory' : ''} ${isDragSource ? 'files-tree-item--dragging' : ''} ${isDropTarget ? 'files-tree-item--drop-target' : ''}`}
+          className={`files-tree-item ${isSelected ? 'files-tree-item--selected' : ''} ${entry.isDirectory ? 'files-tree-item--directory' : ''} ${isDragSource ? 'files-tree-item--dragging' : ''} ${isDropTarget ? 'files-tree-item--drop-target' : ''} ${entry.isIgnored ? 'files-tree-item--ignored' : ''}`}
           style={{ paddingLeft: 8 + depth * 16 }}
           onClick={() => !isRenaming && handleFileClick(entry)}
           onContextMenu={(e) => handleContextMenu(e, entry)}

@@ -16,14 +16,12 @@ import type { WorkspaceContext } from '../../plugins/types';
 // Badges
 import { McpBadge } from './badges/McpBadge';
 import { ContinueInClaudeBadge } from './badges/ContinueInClaudeBadge';
-import { ErrorBadge } from './badges/ErrorBadge';
 import { EnvironmentBadge } from './badges/EnvironmentBadge';
 import { PortBadge } from './badges/PortBadge';
 import { FeedbackBadge } from './badges/FeedbackBadge';
 
 // Modals
 import { McpModal } from './modals/McpModal';
-import { ErrorModal } from './modals/ErrorModal';
 import { FeedbackModal } from './modals/FeedbackModal';
 
 
@@ -60,15 +58,7 @@ export function SmartStatusBar({
 
   // Modal states
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
-  const [errorModalOpen, setErrorModalOpen] = useState(false);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
-
-
-  // Error state from AI triage (via error-detected IPC)
-  const [lastExitCode, setLastExitCode] = useState<number | null>(null);
-  const [lastCommand, setLastCommand] = useState<string | null>(null);
-  const [errorSummary, setErrorSummary] = useState<string | null>(null);
-  const [errorDismissed, setErrorDismissed] = useState(false);
 
   // Environment info
   const [envInfo, setEnvInfo] = useState<EnvironmentInfo | null>(null);
@@ -81,41 +71,6 @@ export function SmartStatusBar({
     window.terminalAPI.getClaudeStatus().then(setClaudeStatus).catch(console.error);
   }, []);
 
-  // Listen for AI-triaged error notifications (from terminal-bridge)
-  useEffect(() => {
-    const cleanup = window.terminalAPI.onMessage((message: unknown) => {
-      const msg = message as {
-        type: string;
-        sessionId?: string;
-        exitCode?: number;
-        command?: string;
-        summary?: string;
-      };
-
-      if (msg.type === 'error-detected' && msg.sessionId === focusedSessionId) {
-        setLastExitCode(msg.exitCode ?? null);
-        setLastCommand(msg.command ?? null);
-        setErrorSummary(msg.summary ?? null);
-        setErrorDismissed(false);
-      } else if (msg.type === 'error-dismissed' && msg.sessionId === focusedSessionId) {
-        setLastExitCode(null);
-        setLastCommand(null);
-        setErrorSummary(null);
-        setErrorDismissed(false);
-      }
-    });
-
-    return cleanup;
-  }, [focusedSessionId]);
-
-  // Clear error state when focused session changes
-  useEffect(() => {
-    setLastExitCode(null);
-    setLastCommand(null);
-    setErrorSummary(null);
-    setErrorDismissed(false);
-  }, [focusedSessionId]);
-
   // Handle model change
 
   // Handle Continue in Claude click - type `claude --resume XXX --dangerously-skip-permissions`
@@ -124,25 +79,6 @@ export function SmartStatusBar({
     const command = `claude --resume ${claudeSessionId} --dangerously-skip-permissions`;
     window.terminalAPI.input(focusedSessionId, command);
   }, [focusedSessionId, claudeSessionId]);
-
-  // Handle error diagnosis - spawn claude with error context
-  const handleDiagnose = useCallback(() => {
-    if (!focusedSessionId || lastExitCode === null) return;
-
-    const query = lastCommand
-      ? `The command "${lastCommand}" failed with exit code ${lastExitCode}. What went wrong and how can I fix it?`
-      : `My last command failed with exit code ${lastExitCode}. What does this mean and how can I fix it?`;
-
-    window.terminalAPI.input(focusedSessionId, `? ${query}\n`);
-    setErrorModalOpen(false);
-    setErrorDismissed(true);
-  }, [focusedSessionId, lastExitCode, lastCommand]);
-
-  // Handle error dismiss
-  const handleErrorDismiss = useCallback(() => {
-    setErrorDismissed(true);
-    setErrorModalOpen(false);
-  }, []);
 
   // Handle port click - open in browser
   const handlePortClick = useCallback(() => {
@@ -166,7 +102,6 @@ export function SmartStatusBar({
   const hasBadges =
     showMcpBadge ||
     (focusedSessionId && claudeSessionId && claudeStatus?.authenticated) || // ContinueInClaudeBadge
-    (lastExitCode !== null && lastExitCode !== 0 && !errorDismissed) || // ErrorBadge
     hasPluginBadges || // Plugin badges (git, etc.)
     detectedPort !== null || // PortBadge
     envInfo !== null; // EnvironmentBadge
@@ -206,13 +141,6 @@ export function SmartStatusBar({
           />
         )}
 
-        {/* Error Badge */}
-        <ErrorBadge
-          exitCode={lastExitCode}
-          dismissed={errorDismissed}
-          summary={errorSummary}
-          onClick={() => setErrorModalOpen(true)}
-        />
       </div>
 
       <div className="smart-status-bar__right">
@@ -239,16 +167,6 @@ export function SmartStatusBar({
           onShowInstructions={onShowMcpInstructions}
         />
       )}
-
-      <ErrorModal
-        isOpen={errorModalOpen}
-        onClose={() => setErrorModalOpen(false)}
-        exitCode={lastExitCode ?? 0}
-        command={lastCommand ?? undefined}
-        summary={errorSummary ?? undefined}
-        onDiagnose={handleDiagnose}
-        onDismiss={handleErrorDismiss}
-      />
 
       <FeedbackModal
         isOpen={feedbackModalOpen}

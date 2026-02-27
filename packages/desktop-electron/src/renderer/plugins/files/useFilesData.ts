@@ -13,23 +13,14 @@ export interface DirEntry {
   isFile: boolean;
   /** Absolute path */
   path: string;
+  /** True if the entry is gitignored */
+  isIgnored?: boolean;
 }
 
-/** Directories and files to hide from the tree */
+/** Entries that should never appear in the tree (not useful to browse) */
 const DENY_LIST = new Set([
   '.git',
-  'node_modules',
   '.DS_Store',
-  '__pycache__',
-  '.next',
-  '.turbo',
-  '.cache',
-  'coverage',
-  '.venv',
-  '.env',
-  'dist',
-  '.nuxt',
-  '.svelte-kit',
   'Thumbs.db',
 ]);
 
@@ -62,7 +53,7 @@ async function fetchDirEntries(dirPath: string): Promise<DirEntry[]> {
   const result = await window.terminalAPI.readDir(dirPath);
   if (!result.success || !result.entries) return [];
 
-  return result.entries
+  const entries: DirEntry[] = result.entries
     .filter((e) => !DENY_LIST.has(e.name))
     .map((e) => ({
       name: e.name,
@@ -70,6 +61,24 @@ async function fetchDirEntries(dirPath: string): Promise<DirEntry[]> {
       isFile: e.isFile,
       path: `${dirPath}/${e.name}`,
     }));
+
+  // Tag gitignored entries so the UI can dim them
+  const paths = entries.map((e) => e.path);
+  try {
+    const ignoreResult = await window.terminalAPI.gitCheckIgnore(paths);
+    if (ignoreResult.success && ignoreResult.ignored.length > 0) {
+      const ignoredSet = new Set(ignoreResult.ignored);
+      for (const entry of entries) {
+        if (ignoredSet.has(entry.path)) {
+          entry.isIgnored = true;
+        }
+      }
+    }
+  } catch {
+    // Not in a git repo or git not available — leave entries as-is
+  }
+
+  return entries;
 }
 
 export function useFilesData({

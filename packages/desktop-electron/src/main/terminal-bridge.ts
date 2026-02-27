@@ -50,10 +50,6 @@ import {
   flushMarkdownStream,
   type MarkdownStreamState,
 } from "./markdown-terminal.js";
-import {
-  triageError,
-  buildTriagePrompt,
-} from "./error-triage.js";
 
 // AI settings type matching settings-store.ts
 interface AISettingsFromStore {
@@ -300,12 +296,6 @@ export class TerminalBridge {
 
   // Track last command text per session (for error triage context)
   private sessionLastCommand: Map<string, string> = new Map();
-
-  // Track pending error triage processes (for cancellation)
-  private sessionErrorTriage: Map<string, { cancel: () => void }> = new Map();
-
-  // Rate limit: track last error triage timestamp per session
-  private sessionLastTriageTime: Map<string, number> = new Map();
 
   // Track if a command was fast-tracked (known command, skipped ML)
   private sessionFastTracked: Map<string, boolean> = new Map();
@@ -1358,17 +1348,9 @@ export class TerminalBridge {
     this.sessionAIContexts.delete(sessionId);
     this.sessionAutocomplete.delete(sessionId);
     this.sessionLastCommand.delete(sessionId);
-    this.sessionLastTriageTime.delete(sessionId);
     this.sessionFastTracked.delete(sessionId);
     this.sessionFastTrackLines.delete(sessionId);
     this.stopLoadingAnimation(sessionId);
-
-    // Cancel pending error triage
-    const pendingTriage = this.sessionErrorTriage.get(sessionId);
-    if (pendingTriage) {
-      pendingTriage.cancel();
-      this.sessionErrorTriage.delete(sessionId);
-    }
 
     // Notify MCP server of session close (may trigger auto-reattach)
     if (this.mcpServer) {
@@ -1755,53 +1737,23 @@ export class TerminalBridge {
   /**
    * Send error notification to renderer
    */
-  private sendErrorNotification(
-    sessionId: string,
-    exitCode: number,
-    command?: string | null,
-    summary?: string
-  ): void {
-    debug(`sendErrorNotification: session=${sessionId}, exitCode=${exitCode}, command=${command}, summary=${summary}`);
-    if (!this.disposed && this.window && !this.window.isDestroyed()) {
-      this.window.webContents.send("terminal:message", {
-        type: "error-detected",
-        sessionId,
-        exitCode,
-        command: command || undefined,
-        summary: summary || undefined,
-        timestamp: Date.now(),
-      });
-    }
-  }
-
   /**
    * Handle a fast-tracked command that failed (non-zero exit).
    * Re-classify the original input with ML — if it was NL, invoke AI retroactively.
-   * If it was a real command that failed, fall through to normal error triage.
    */
   private async handleFailedFastTrack(
     session: ManagedSession,
     sessionId: string,
-    exitCode: number
+    _exitCode: number
   ): Promise<void> {
     const lastCommand = this.sessionLastCommand.get(sessionId);
-    if (!lastCommand) {
-      // No command text — fall through to normal triage
-      this.triageAndNotifyError(sessionId, exitCode);
-      return;
-    }
+    if (!lastCommand) return;
 
     // Check AI prerequisites
-    if (!this.claudeCode) {
-      this.triageAndNotifyError(sessionId, exitCode);
-      return;
-    }
+    if (!this.claudeCode) return;
     const settings = getSettings();
     const aiSettings = settings.ai || { enabled: true, confirmBeforeInvoking: false, showIndicator: true, denylist: '' };
-    if (!aiSettings.enabled) {
-      this.triageAndNotifyError(sessionId, exitCode);
-      return;
-    }
+    if (!aiSettings.enabled) return;
 
     // Re-classify with ML
     const result = await classifyInput(lastCommand);
@@ -1812,9 +1764,6 @@ export class TerminalBridge {
       debug(`Fast-tracked command was NL, invoking AI retroactively`);
       const outputLines = this.sessionFastTrackLines.get(sessionId) || 0;
       if (outputLines > 1) {
-        // Erase error output + new prompt, but keep the original prompt line.
-        // outputLines includes the Enter-echo \n, so -1 lands on the first
-        // error line rather than the original prompt.
         const linesToErase = outputLines - 1;
         this.writeToTerminalDisplay(
           sessionId,
@@ -1823,124 +1772,7 @@ export class TerminalBridge {
         debug(`Erased ${linesToErase} lines of fast-track output`);
       }
       this.invokeAIForSession(session, sessionId, lastCommand, aiSettings);
-    } else {
-      // Real command that failed — normal error triage
-      this.triageAndNotifyError(sessionId, exitCode);
     }
-  }
-
-  /**
-   * Triage an error using AI and conditionally notify the renderer.
-   *
-   * Flow:
-   * 1. Fast-skip signals (130=SIGINT, 143=SIGTERM)
-   * 2. If Claude not installed or AI disabled → no badge
-   * 3. Rate limit: skip if <3s since last triage for this session
-   * 4. Get command text + last 30 lines of terminal output
-   * 5. Spawn `claude -p --model haiku` for triage
-   * 6. If shouldNotify → send error notification with summary
-   * 7. If !shouldNotify or failure → no badge
-   */
-  private async triageAndNotifyError(sessionId: string, exitCode: number): Promise<void> {
-    // Fast-skip: user-initiated signals
-    if (exitCode === 130 || exitCode === 143) {
-      debug(`triageAndNotifyError: skipping signal exit code ${exitCode}`);
-      return;
-    }
-
-    // Check if Claude is installed and AI is enabled
-    if (!this.claudeCode) {
-      debug("triageAndNotifyError: Claude not installed, skipping");
-      return;
-    }
-
-    const settings = getSettings();
-    const aiSettings = settings.ai || { enabled: true, confirmBeforeInvoking: false, showIndicator: true, denylist: '' };
-    if (!aiSettings.enabled) {
-      debug("triageAndNotifyError: AI disabled in settings, skipping");
-      return;
-    }
-
-    // Rate limit: skip if <3s since last triage for this session
-    const now = Date.now();
-    const lastTriageTime = this.sessionLastTriageTime.get(sessionId) || 0;
-    if (now - lastTriageTime < 3000) {
-      debug("triageAndNotifyError: rate limited, skipping");
-      return;
-    }
-    this.sessionLastTriageTime.set(sessionId, now);
-
-    // Cancel any pending triage for this session
-    const pendingTriage = this.sessionErrorTriage.get(sessionId);
-    if (pendingTriage) {
-      pendingTriage.cancel();
-      this.sessionErrorTriage.delete(sessionId);
-    }
-
-    // Get command text
-    const command = this.sessionLastCommand.get(sessionId) || null;
-
-    // Get last 30 lines of terminal output
-    let recentOutput = "";
-    try {
-      const contentResult = this.getContent(sessionId);
-      if (contentResult.success && contentResult.content) {
-        const lines = contentResult.content.split("\n");
-        recentOutput = lines.slice(-30).join("\n");
-      }
-    } catch {
-      // Session may have been disposed
-    }
-
-    // Build prompt and spawn triage
-    const prompt = buildTriagePrompt(command, exitCode, recentOutput);
-    const sessionCwd = this.getCwd(sessionId);
-    const cwd = sessionCwd.success && sessionCwd.cwd ? sessionCwd.cwd : undefined;
-
-    const handle = triageError(this.claudeCode.path, prompt, cwd);
-    this.sessionErrorTriage.set(sessionId, handle);
-
-    try {
-      const result = await handle.promise;
-      // Clean up handle
-      this.sessionErrorTriage.delete(sessionId);
-
-      if (!result) {
-        debug("triageAndNotifyError: triage returned null (failure/timeout), no badge");
-        return;
-      }
-
-      if (result.shouldNotify) {
-        debug(`triageAndNotifyError: notifying with summary: ${result.message}`);
-        this.sendErrorNotification(sessionId, exitCode, command, result.message);
-        // Report diagnostics to IDE protocol server for Claude Code
-        this.ideProtocolServer?.updateDiagnostics(sessionId, {
-          exitCode,
-          command: command || "",
-          summary: result.message,
-          timestamp: Date.now(),
-        });
-      } else {
-        debug(`triageAndNotifyError: suppressed (shouldNotify=false)`);
-      }
-    } catch (err) {
-      debug(`triageAndNotifyError: error during triage: ${err}`);
-      this.sessionErrorTriage.delete(sessionId);
-    }
-  }
-
-  /**
-   * Auto-dismiss error for a session (new command starting)
-   */
-  private autoDismissError(sessionId: string): void {
-    if (!this.disposed && this.window && !this.window.isDestroyed()) {
-      this.window.webContents.send("terminal:message", {
-        type: "error-dismissed",
-        sessionId,
-      });
-    }
-    // Clear diagnostics from IDE protocol server
-    this.ideProtocolServer?.clearDiagnostics(sessionId);
   }
 
   /**
@@ -2184,23 +2016,12 @@ export class TerminalBridge {
               commandRunning = false;
             }
 
-            // Error detection via exit codes (skip 126=not executable, 127=command not found)
+            // Retroactive NL check: if a fast-tracked command failed, re-classify with ML
             if (mark.type === 'command-end' && mark.exitCode !== undefined && mark.exitCode !== 0
                 && mark.exitCode !== 126 && mark.exitCode !== 127) {
               if (this.sessionFastTracked.get(sessionId)) {
-                // Fast-tracked command failed — retroactive ML check
                 this.handleFailedFastTrack(session, sessionId, mark.exitCode);
-              } else {
-                this.triageAndNotifyError(sessionId, mark.exitCode);
               }
-            } else if (mark.type === 'output-start') {
-              // New command starting — cancel pending triage + auto-dismiss previous error
-              const pendingTriage = this.sessionErrorTriage.get(sessionId);
-              if (pendingTriage) {
-                pendingTriage.cancel();
-                this.sessionErrorTriage.delete(sessionId);
-              }
-              this.autoDismissError(sessionId);
             }
           }
         }
@@ -2382,12 +2203,6 @@ export class TerminalBridge {
       this.guiStream.removeClient(this.clientId);
     }
     this.guiStream.dispose();
-
-    // Cancel all pending error triages
-    for (const handle of this.sessionErrorTriage.values()) {
-      handle.cancel();
-    }
-    this.sessionErrorTriage.clear();
 
     // Clean up manager
     if (this.manager) {

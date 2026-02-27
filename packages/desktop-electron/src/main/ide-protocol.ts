@@ -87,7 +87,6 @@ export class IdeProtocolServer {
   private authToken: string = "";
   private lockFilePath: string = "";
   private workspaceFolders: string[] = [];
-  private diagnosticsCache: Map<string, IdeDiagnostic> = new Map();
   private pendingSelectionRequests: Map<string, PendingSelectionRequest> = new Map();
   private contextFragments: Array<{ sessionId: string; text: string; addedAt: number }> = [];
   private disposed = false;
@@ -166,20 +165,6 @@ export class IdeProtocolServer {
       port: this.port,
       hasClient: this.client !== null && this.client.readyState === WebSocket.OPEN,
     };
-  }
-
-  /**
-   * Update diagnostics cache from terminal-bridge error triage.
-   */
-  updateDiagnostics(sessionId: string, diagnostic: Omit<IdeDiagnostic, "sessionId">): void {
-    this.diagnosticsCache.set(sessionId, { sessionId, ...diagnostic });
-  }
-
-  /**
-   * Clear diagnostics for a session (e.g., when error auto-dismissed).
-   */
-  clearDiagnostics(sessionId: string): void {
-    this.diagnosticsCache.delete(sessionId);
   }
 
   /**
@@ -677,8 +662,7 @@ export class IdeProtocolServer {
 
     switch (toolName) {
       case "getDiagnostics": {
-        const diagnostics = Array.from(this.diagnosticsCache.values());
-        return mcpText(JSON.stringify({ diagnostics }));
+        return mcpText(JSON.stringify({ diagnostics: [] }));
       }
 
       case "getOpenEditors":
@@ -743,12 +727,10 @@ export class IdeProtocolServer {
   // ==========================================
 
   /**
-   * Handle getDiagnostics tool — return cached diagnostics.
+   * Handle getDiagnostics tool — always returns empty (error triage removed).
    */
   private handleGetDiagnostics(): { diagnostics: IdeDiagnostic[] } {
-    return {
-      diagnostics: Array.from(this.diagnosticsCache.values()),
-    };
+    return { diagnostics: [] };
   }
 
   /**
@@ -942,8 +924,7 @@ export class IdeProtocolServer {
     }
     this.pendingSelectionRequests.clear();
 
-    // Clear diagnostics and context fragments
-    this.diagnosticsCache.clear();
+    // Clear context fragments
     this.contextFragments = [];
 
     this.port = 0;

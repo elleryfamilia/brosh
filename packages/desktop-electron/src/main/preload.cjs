@@ -241,6 +241,7 @@ contextBridge.exposeInMainWorld("terminalAPI", {
 
   // Git root
   getGitRoot: (cwd) => ipcRenderer.invoke("git:getRoot", cwd),
+  gitCheckIgnore: (paths) => ipcRenderer.invoke("git:checkIgnore", paths),
 
   // Git commits
   getGitCommits: (cwd, count) => ipcRenderer.invoke("git:getCommits", cwd, count),

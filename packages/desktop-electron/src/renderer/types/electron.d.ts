@@ -185,6 +185,7 @@ export interface TerminalAPI {
 
   // Git root
   getGitRoot: (cwd?: string) => Promise<{ success: boolean; root: string | null }>;
+  gitCheckIgnore: (paths: string[]) => Promise<{ success: boolean; ignored: string[] }>;
 
   // Git commits
   getGitCommits: (cwd?: string, count?: number) => Promise<GitCommitResult[] | null>;

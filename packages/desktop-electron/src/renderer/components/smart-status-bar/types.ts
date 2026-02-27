@@ -171,16 +171,6 @@ export interface RecordingModalProps {
   onDiscard?: () => void;
 }
 
-// Error modal props
-export interface ErrorModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  exitCode: number;
-  stderr?: string;
-  onDiagnose?: () => void;
-  onDismiss: () => void;
-}
-
 // Git modal props (informational only, no actions)
 export interface GitModalProps {
   isOpen: boolean;
