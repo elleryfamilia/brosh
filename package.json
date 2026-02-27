@@ -35,7 +35,7 @@
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "^0.0.32",
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@xterm/headless": "file:../xterm.js/headless",
+    "@xterm/headless": "file:vendor/xterm-headless-5.5.0.tgz",
     "ink": "^5.0.1",
     "node-pty": "^1.2.0-beta.8",
     "react": "^18.3.1",
