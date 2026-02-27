@@ -161,7 +161,7 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
     window.terminalAPI.setWindowOpacity(opacity).catch(console.error);
   }, [settings.advanced.windowOpacity]);
 
-  // Load settings on mount
+  // Load settings on mount and listen for cross-window changes
   useEffect(() => {
     window.terminalAPI
       .getSettings()
@@ -173,6 +173,12 @@ export function SettingsProvider({ children }: SettingsProviderProps) {
         console.error('Failed to load settings:', err);
         setIsLoaded(true); // Still mark as loaded, using defaults
       });
+
+    // When another window changes settings, update our local state
+    const cleanup = window.terminalAPI.onSettingsChanged((updated) => {
+      setSettings(updated);
+    });
+    return cleanup;
   }, []);
 
   // Update settings

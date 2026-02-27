@@ -249,13 +249,26 @@ export function initSettingsHandlers(): void {
   });
 
   // Update settings
-  ipcMain.handle('settings:update', (_event, updates: Partial<AppSettings>) => {
-    return updateSettings(updates);
+  ipcMain.handle('settings:update', (event, updates: Partial<AppSettings>) => {
+    const updated = updateSettings(updates);
+    // Broadcast to all other windows so they pick up the change
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.webContents !== event.sender && !win.isDestroyed()) {
+        win.webContents.send('settings:changed', updated);
+      }
+    }
+    return updated;
   });
 
   // Reset settings
-  ipcMain.handle('settings:reset', () => {
-    return resetSettings();
+  ipcMain.handle('settings:reset', (event) => {
+    const defaults = resetSettings();
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (win.webContents !== event.sender && !win.isDestroyed()) {
+        win.webContents.send('settings:changed', defaults);
+      }
+    }
+    return defaults;
   });
 
   // Set window opacity (0.0 to 1.0)
