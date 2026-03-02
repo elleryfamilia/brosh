@@ -5,12 +5,14 @@
  * Import this module to activate the plugin.
  */
 
+import { lazy } from 'react';
 import { registerSidebarPlugin } from '../registry';
 import type { RegisteredPlugin } from '../types';
 import { PlansBadge } from './PlansBadge';
-import { PlansPanel } from './PlansPanel';
-import { PlansEditorPanel } from './PlansEditorPanel';
 import { getPlansBadgeState } from './useBadgeState';
+
+const PlansPanel = lazy(() => import('./PlansPanel').then(m => ({ default: m.PlansPanel })));
+const PlansEditorPanel = lazy(() => import('./PlansEditorPanel').then(m => ({ default: m.PlansEditorPanel })));
 
 const plansPlugin: RegisteredPlugin = {
   definition: {

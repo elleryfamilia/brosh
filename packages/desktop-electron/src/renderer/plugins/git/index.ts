@@ -5,11 +5,13 @@
  * Import this module to activate the git plugin.
  */
 
+import { lazy } from 'react';
 import { registerSidebarPlugin } from '../registry';
 import type { RegisteredPlugin } from '../types';
 import { GitPluginBadge } from './GitBadge';
-import { GitPanel } from './GitPanel';
 import { getGitBadgeState } from './useBadgeState';
+
+const GitPanel = lazy(() => import('./GitPanel').then(m => ({ default: m.GitPanel })));
 
 const gitPlugin: RegisteredPlugin = {
   definition: {

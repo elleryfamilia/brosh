@@ -14,6 +14,16 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       input: resolve(__dirname, 'src/renderer/index.html'),
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react/jsx-runtime'],
+          'vendor-xterm': [
+            '@xterm/xterm', '@xterm/addon-fit', '@xterm/addon-webgl',
+            '@xterm/addon-canvas', '@xterm/addon-web-links', '@xterm/addon-image',
+            '@xterm/addon-clipboard', '@xterm/addon-search',
+          ],
+        },
+      },
     },
   },
   server: {

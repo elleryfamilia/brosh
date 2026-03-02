@@ -6,7 +6,7 @@
  * display:none and receive isActive:false so their data hooks idle.
  */
 
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, Suspense } from 'react';
 import { getPlugin } from './registry';
 import type { PluginContext, DiffSource, WorkspaceContext } from './types';
 
@@ -154,12 +154,14 @@ export function SidebarHost({
             style={isActive ? undefined : { display: 'none' }}
             className={suppressAnim ? 'sidebar-no-anim' : undefined}
           >
-            <Panel
-              context={isActive ? activeContext : inactiveContext}
-              width={w}
-              onResize={resizeHandlerRef.current!}
-              onClose={onClose}
-            />
+            <Suspense fallback={<div className="sidebar-loading" />}>
+              <Panel
+                context={isActive ? activeContext : inactiveContext}
+                width={w}
+                onResize={resizeHandlerRef.current!}
+                onClose={onClose}
+              />
+            </Suspense>
           </div>
         );
       })}

@@ -5,12 +5,14 @@
  * Import this module to activate the plugin.
  */
 
+import { lazy } from 'react';
 import { registerSidebarPlugin } from '../registry';
 import type { RegisteredPlugin } from '../types';
 import { DocsBadge } from './DocsBadge';
-import { DocsPanel } from './DocsPanel';
-import { DocsEditorPanel } from './DocsEditorPanel';
 import { getDocsBadgeState } from './useBadgeState';
+
+const DocsPanel = lazy(() => import('./DocsPanel').then(m => ({ default: m.DocsPanel })));
+const DocsEditorPanel = lazy(() => import('./DocsEditorPanel').then(m => ({ default: m.DocsEditorPanel })));
 
 const docsPlugin: RegisteredPlugin = {
   definition: {

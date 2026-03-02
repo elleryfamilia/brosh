@@ -6,7 +6,7 @@
  * inline selector for split panes.
  */
 
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, lazy, Suspense } from "react";
 import { TitleBar } from "./components/TitleBar";
 import { McpConflictDialog } from "./components/McpConflictDialog";
 import { McpDisconnectDialog } from "./components/McpDisconnectDialog";
@@ -15,7 +15,9 @@ import { SandboxSettingsTooltip } from "./components/SandboxSettingsTooltip";
 import { WelcomeModal } from "./components/WelcomeModal";
 import { ModeSelectionModal } from "./components/ModeSelectionModal";
 import { PaneContainer } from "./components/PaneContainer";
-import { ClaudePanel } from "./components/ClaudePanel";
+const ClaudePanel = lazy(() =>
+  import("./components/ClaudePanel").then(m => ({ default: m.ClaudePanel }))
+);
 import { SmartStatusBar } from "./components/smart-status-bar";
 import { ToastContainer } from "./components/ToastContainer";
 import type { ToastData } from "./components/Toast";
@@ -23,7 +25,10 @@ import { ContextMenu } from "./components/ContextMenu";
 import type { ContextMenuGroup } from "./components/ContextMenu";
 import type { TerminalMethods } from "./components/Terminal";
 import { FindBar } from "./components/FindBar";
-import { SettingsPanel, useSettings } from "./settings";
+import { useSettings } from "./settings";
+const SettingsPanel = lazy(() =>
+  import("./settings/SettingsPanel").then(m => ({ default: m.SettingsPanel }))
+);
 import type { SandboxConfig } from "./types/sandbox";
 import type { Pane, SplitDirection, PaneSandboxConfig, DiffSource } from "./types/pane";
 import {
@@ -50,7 +55,9 @@ import {
   replacePaneInTree,
   hasPendingPanes,
 } from "./utils/paneTree";
-import { EditorPane } from "./components/EditorPane";
+const EditorPane = lazy(() =>
+  import("./components/EditorPane").then(m => ({ default: m.EditorPane }))
+);
 import { trackTerminalCreated, trackMcpAttachment } from "./utils/analytics";
 import type { NavigationDirection } from "./utils/paneTree";
 import type { ErrorNotification } from "./components/ErrorNotificationBar";
@@ -108,6 +115,7 @@ export function App() {
 
   // Mode selection modal state
   const [showModeModal, setShowModeModal] = useState(false);
+  const [isCreatingTerminal, setIsCreatingTerminal] = useState(false);
 
   // Track if this is the initial terminal creation in this window (for logo display)
   // Logo only shows on first terminal of first window
@@ -349,9 +357,11 @@ export function App() {
     async (mode: "direct" | "sandbox", config?: SandboxConfig) => {
       hasCreatedFirstTerminal.current = true;
       setShowModeModal(false);
+      setIsCreatingTerminal(true);
       pendingTabModeRef.current = mode;
       pendingTabConfigRef.current = config;
       await createInitialPane(mode, config);
+      setIsCreatingTerminal(false);
       trackTerminalCreated(mode, false);
     },
     [createInitialPane]
@@ -1532,23 +1542,25 @@ export function App() {
                   </div>
                 </div>
               )}
-              {CustomEditorPanel ? (
-                <CustomEditorPanel
-                  filePath={editorFile.filePath}
-                  onClose={handleEditorClose}
-                />
-              ) : (
-                <EditorPane
-                  paneId="editor-panel"
-                  filePath={editorFile.filePath}
-                  isDiff={editorFile.isDiff}
-                  diffSource={editorFile.diffSource}
-                  isFocused={true}
-                  isVisible={true}
-                  onFocus={() => {}}
-                  onClose={handleEditorClose}
-                />
-              )}
+              <Suspense fallback={<div className="editor-loading" />}>
+                {CustomEditorPanel ? (
+                  <CustomEditorPanel
+                    filePath={editorFile.filePath}
+                    onClose={handleEditorClose}
+                  />
+                ) : (
+                  <EditorPane
+                    paneId="editor-panel"
+                    filePath={editorFile.filePath}
+                    isDiff={editorFile.isDiff}
+                    diffSource={editorFile.diffSource}
+                    isFocused={true}
+                    isVisible={true}
+                    onFocus={() => {}}
+                    onClose={handleEditorClose}
+                  />
+                )}
+              </Suspense>
             </div>
           );
         })()}
@@ -1595,24 +1607,31 @@ export function App() {
           </div>
           );
         })() : null}
-        {!rootPane && !showModeModal && !showWelcomeModal && welcomeCheckComplete && (
+        {isCreatingTerminal && !rootPane && (
+          <div className="terminal-skeleton">
+            <div className="terminal-skeleton-cursor" />
+          </div>
+        )}
+        {!rootPane && !isCreatingTerminal && !showModeModal && !showWelcomeModal && welcomeCheckComplete && (
           <div className="no-tabs">
             <p>No terminals open</p>
             <button onClick={() => setShowModeModal(true)}>New Terminal</button>
           </div>
         )}
         {(showClaudePanel || claudePanelSessionId) && (
-          <ClaudePanel
-            sessionId={claudePanelSessionId}
-            onSessionCreated={setClaudePanelSessionId}
-            width={claudePanelWidth}
-            onResize={handleClaudePanelResize}
-            onClose={() => setShowClaudePanel(false)}
-            visible={showClaudePanel}
-            getCwd={getClaudePanelCwd}
-            projectName={claudeProjectName}
-            focusedSessionId={focusedSessionId}
-          />
+          <Suspense fallback={null}>
+            <ClaudePanel
+              sessionId={claudePanelSessionId}
+              onSessionCreated={setClaudePanelSessionId}
+              width={claudePanelWidth}
+              onResize={handleClaudePanelResize}
+              onClose={() => setShowClaudePanel(false)}
+              visible={showClaudePanel}
+              getCwd={getClaudePanelCwd}
+              projectName={claudeProjectName}
+              focusedSessionId={focusedSessionId}
+            />
+          </Suspense>
         )}
       </div>
       <SmartStatusBar
@@ -1654,7 +1673,11 @@ export function App() {
         onModeSelected={handleModeSelected}
         showLogo={isFirstAppWindow && !hasCreatedFirstTerminal.current}
       />
-      <SettingsPanel isOpen={showSettingsPanel} onClose={closeSettings} />
+      {showSettingsPanel && (
+        <Suspense fallback={null}>
+          <SettingsPanel isOpen={showSettingsPanel} onClose={closeSettings} />
+        </Suspense>
+      )}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
       <ContextMenu
         isOpen={contextMenu.isOpen}
