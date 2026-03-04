@@ -149,8 +149,6 @@ export interface TerminalAPI {
   // Claude Code status
   getClaudeStatus: () => Promise<ClaudeStatus>;
   setClaudeModel: (model: ClaudeModel) => Promise<{ success: boolean }>;
-  getClaudeSessionId: (terminalSessionId: string) => Promise<string | null>;
-  onClaudeSessionChanged: (callback: (data: ClaudeSessionChange) => void) => () => void;
 
   // Shell utilities
   openExternal: (url: string) => Promise<{ success: boolean; error?: string }>;
@@ -321,10 +319,6 @@ export interface ClaudeStatus {
   model?: string;
 }
 
-export interface ClaudeSessionChange {
-  sessionId: string;        // Terminal session ID
-  claudeSessionId: string;  // Claude's session ID for resume
-}
 
 // MCP Activity Events
 export interface McpToolCallStarted {

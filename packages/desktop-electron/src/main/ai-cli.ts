@@ -72,19 +72,58 @@ export interface DetectedBackend {
 }
 
 /**
- * Check if a backend is installed
+ * Build list of known install locations for a CLI command.
+ * When launched as a macOS GUI app (Finder/Spotlight), PATH is minimal
+ * (/usr/bin:/bin:/usr/sbin:/sbin) and won't include user-installed paths.
  */
-function isBackendInstalled(config: AIBackendConfig): string | null {
-  // When launched as a macOS GUI app (Finder/Spotlight), PATH is minimal
-  // (/usr/bin:/bin:/usr/sbin:/sbin) and won't include ~/.local/bin etc.
-  // Check well-known install locations first before falling back to `which`.
-  const knownPaths = [
-    path.join(os.homedir(), ".local", "bin", config.command),
-    `/usr/local/bin/${config.command}`,
-    path.join(os.homedir(), ".npm-global", "bin", config.command),
+function getKnownPaths(command: string): string[] {
+  const home = os.homedir();
+  const paths = [
+    // Direct install (claude native installer)
+    path.join(home, ".local", "bin", command),
+    // Homebrew (Apple Silicon + Intel)
+    `/opt/homebrew/bin/${command}`,
+    `/usr/local/bin/${command}`,
+    // npm global
+    path.join(home, ".npm-global", "bin", command),
+    // volta
+    path.join(home, ".volta", "bin", command),
+    // bun
+    path.join(home, ".bun", "bin", command),
+    // pnpm
+    path.join(home, ".local", "share", "pnpm", command),
   ];
 
-  for (const candidate of knownPaths) {
+  // nvm — check all installed node versions
+  const nvmDir = path.join(home, ".nvm", "versions", "node");
+  try {
+    for (const ver of fs.readdirSync(nvmDir)) {
+      paths.push(path.join(nvmDir, ver, "bin", command));
+    }
+  } catch {
+    // nvm not installed
+  }
+
+  // fnm
+  const fnmDir = path.join(home, "Library", "Application Support", "fnm", "node-versions");
+  try {
+    for (const ver of fs.readdirSync(fnmDir)) {
+      paths.push(path.join(fnmDir, ver, "installation", "bin", command));
+    }
+  } catch {
+    // fnm not installed
+  }
+
+  return paths;
+}
+
+/**
+ * Check if a backend is installed.
+ * Uses a layered approach: known paths → bare `which` → login shell `which`.
+ */
+function isBackendInstalled(config: AIBackendConfig): string | null {
+  // 1. Check well-known install locations (works even with minimal GUI PATH)
+  for (const candidate of getKnownPaths(config.command)) {
     try {
       fs.accessSync(candidate, fs.constants.X_OK);
       return candidate;
@@ -93,7 +132,7 @@ function isBackendInstalled(config: AIBackendConfig): string | null {
     }
   }
 
-  // Fall back to `which` (works when launched from terminal with full PATH)
+  // 2. Try `which` with current PATH (works when launched from terminal)
   try {
     const result = execSync(config.checkCommand, {
       encoding: "utf-8",
@@ -115,8 +154,28 @@ function isBackendInstalled(config: AIBackendConfig): string | null {
       return config.command;
     }
   } catch {
-    return null;
+    // `which` failed with minimal PATH
   }
+
+  // 3. Last resort: use a login shell to get the user's full PATH
+  try {
+    const shell = process.env.SHELL || "/bin/zsh";
+    const result = execSync(
+      `${shell} -l -c 'which ${config.command}'`,
+      {
+        encoding: "utf-8",
+        timeout: 5000,
+        stdio: ["pipe", "pipe", "pipe"],
+        env: { ...process.env, HOME: os.homedir() },
+      }
+    );
+    const found = result.trim();
+    if (found) return found;
+  } catch {
+    // Shell sourcing failed
+  }
+
+  return null;
 }
 
 /**

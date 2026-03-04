@@ -9,7 +9,7 @@ export { StatusBarModal } from './StatusBarModal';
 // Badges
 export { McpBadge } from './badges/McpBadge';
 export { ClaudeModelBadge } from './badges/ClaudeModelBadge';
-export { ContinueInClaudeBadge } from './badges/ContinueInClaudeBadge';
+
 export { GitBadge } from './badges/GitBadge';
 export { EnvironmentBadge } from './badges/EnvironmentBadge';
 export { PortBadge } from './badges/PortBadge';

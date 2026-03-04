@@ -6,8 +6,7 @@
  * Plugin badges are rendered dynamically from the plugin registry.
  */
 
-import { useState, useEffect, useCallback } from 'react';
-import type { ClaudeStatus } from '../../types/electron.d';
+import { useState, useCallback } from 'react';
 import type { EnvironmentInfo } from './types';
 import { useEnhancedClients } from '../mcp-dashboard/useEnhancedClients';
 import { getPlugins } from '../../plugins/registry';
@@ -15,7 +14,7 @@ import type { WorkspaceContext } from '../../plugins/types';
 
 // Badges
 import { McpBadge } from './badges/McpBadge';
-import { ContinueInClaudeBadge } from './badges/ContinueInClaudeBadge';
+
 import { EnvironmentBadge } from './badges/EnvironmentBadge';
 import { PortBadge } from './badges/PortBadge';
 import { FeedbackBadge } from './badges/FeedbackBadge';
@@ -28,7 +27,7 @@ import { FeedbackModal } from './modals/FeedbackModal';
 export interface SmartStatusBarProps {
   mcpAttachedSessionId: string | null;
   focusedSessionId: string | null;
-  claudeSessionId: string | null;
+
   workspace: WorkspaceContext;
   activeSidebarPlugin: string | null;
   onTogglePlugin: (pluginId: string) => void;
@@ -38,7 +37,6 @@ export interface SmartStatusBarProps {
 export function SmartStatusBar({
   mcpAttachedSessionId,
   focusedSessionId,
-  claudeSessionId,
   workspace,
   activeSidebarPlugin,
   onTogglePlugin,
@@ -53,9 +51,6 @@ export function SmartStatusBar({
     disconnectClient,
   } = useEnhancedClients();
 
-  // Claude status
-  const [claudeStatus, setClaudeStatus] = useState<ClaudeStatus | null>(null);
-
   // Modal states
   const [mcpModalOpen, setMcpModalOpen] = useState(false);
   const [feedbackModalOpen, setFeedbackModalOpen] = useState(false);
@@ -65,20 +60,6 @@ export function SmartStatusBar({
 
   // Port detection
   const [detectedPort, setDetectedPort] = useState<number | null>(null);
-
-  // Fetch Claude status on mount
-  useEffect(() => {
-    window.terminalAPI.getClaudeStatus().then(setClaudeStatus).catch(console.error);
-  }, []);
-
-  // Handle model change
-
-  // Handle Continue in Claude click - type `claude --resume XXX --dangerously-skip-permissions`
-  const handleContinueInClaude = useCallback(() => {
-    if (!focusedSessionId || !claudeSessionId) return;
-    const command = `claude --resume ${claudeSessionId} --dangerously-skip-permissions`;
-    window.terminalAPI.input(focusedSessionId, command);
-  }, [focusedSessionId, claudeSessionId]);
 
   // Handle port click - open in browser
   const handlePortClick = useCallback(() => {
@@ -101,7 +82,6 @@ export function SmartStatusBar({
   // Compute whether any badges are visible
   const hasBadges =
     showMcpBadge ||
-    (focusedSessionId && claudeSessionId && claudeStatus?.authenticated) || // ContinueInClaudeBadge
     hasPluginBadges || // Plugin badges (git, etc.)
     detectedPort !== null || // PortBadge
     envInfo !== null; // EnvironmentBadge
@@ -133,13 +113,6 @@ export function SmartStatusBar({
           />
         )}
 
-        {/* Continue in Claude Badge - only when there's an active Claude session */}
-        {focusedSessionId && claudeSessionId && claudeStatus?.authenticated && (
-          <ContinueInClaudeBadge
-            claudeSessionId={claudeSessionId}
-            onClick={handleContinueInClaude}
-          />
-        )}
 
       </div>
 

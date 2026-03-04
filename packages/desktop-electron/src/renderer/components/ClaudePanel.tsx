@@ -66,6 +66,7 @@ export function ClaudePanel({
   // Track the terminal session + CWD at launch time for directory change detection
   const [launchSessionId, setLaunchSessionId] = useState<string | null>(null);
   const [launchCwd, setLaunchCwd] = useState<string | null>(null);
+  const launchGitRootRef = useRef<string | null>(null);
   // CWD change prompt: shown when the launch terminal's CWD changes
   const [cwdChangePrompt, setCwdChangePrompt] = useState<string | null>(null);
   const rememberRef = useRef(false);
@@ -90,6 +91,10 @@ export function ClaudePanel({
       if (msg.sessionId !== launchSessionId) return;
       if (!msg.cwd || msg.cwd === launchCwd) return;
 
+      // Don't prompt if the new CWD is still within the same git repo
+      const gitRoot = launchGitRootRef.current;
+      if (gitRoot && (msg.cwd === gitRoot || msg.cwd.startsWith(gitRoot + '/'))) return;
+
       setCwdChangePrompt(msg.cwd);
     });
 
@@ -109,6 +114,10 @@ export function ClaudePanel({
     window.terminalAPI.getCwd(focusedSessionId).then((result) => {
       if (!result.success || !result.cwd) return;
       if (result.cwd === launchCwd) return;
+
+      // Don't prompt if the new CWD is still within the same git repo
+      const gitRoot = launchGitRootRef.current;
+      if (gitRoot && (result.cwd === gitRoot || result.cwd.startsWith(gitRoot + '/'))) return;
 
       setCwdChangePrompt(result.cwd);
     });
@@ -166,6 +175,14 @@ export function ClaudePanel({
         // Capture the launch context for directory change detection
         setLaunchSessionId(focusedSessionId);
         setLaunchCwd(cwd ?? null);
+        // Store the git root so we can suppress prompts for subdirectory changes within the same repo
+        if (cwd) {
+          window.terminalAPI.getGitRoot(cwd).then((r) => {
+            launchGitRootRef.current = r.success && r.root ? r.root : null;
+          }).catch(() => { launchGitRootRef.current = null; });
+        } else {
+          launchGitRootRef.current = null;
+        }
 
         // Capture the project name at launch time so it sticks
         if (cwd) {

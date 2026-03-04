@@ -117,12 +117,6 @@ contextBridge.exposeInMainWorld("terminalAPI", {
   isClaudeCodeInstalled: () => ipcRenderer.invoke("ai:isClaudeCodeInstalled"),
   getClaudeStatus: () => ipcRenderer.invoke("ai:getClaudeStatus"),
   setClaudeModel: (model) => ipcRenderer.invoke("ai:setClaudeModel", model),
-  getClaudeSessionId: (terminalSessionId) => ipcRenderer.invoke("ai:getClaudeSessionId", terminalSessionId),
-  onClaudeSessionChanged: (callback) => {
-    const handler = (_event, data) => callback(data);
-    ipcRenderer.on("terminal:claudeSessionChanged", handler);
-    return () => ipcRenderer.removeListener("terminal:claudeSessionChanged", handler);
-  },
   onSettingsChanged: (callback) => {
     const handler = (_event, settings) => callback(settings);
     ipcRenderer.on("settings:changed", handler);

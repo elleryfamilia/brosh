@@ -4447,30 +4447,6 @@ body,
   animation: pulse 1s ease-in-out infinite;
 }
 
-/* Claude badge styles - transparent like other badges */
-.claude-badge-continue {
-  background: transparent;
-  color: inherit;
-  align-items: flex-start;
-  padding-top: 6px;
-  padding-bottom: 4px;
-}
-
-.claude-badge-continue:hover {
-  background: color-mix(in srgb, currentColor 10%, transparent);
-}
-
-.claude-badge-continue-text {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-}
-
-.claude-badge-continue-session {
-  font-size: 9px;
-  opacity: 0.6;
-  font-family: monospace;
-}
 
 .claude-badge-model {
   background: transparent;

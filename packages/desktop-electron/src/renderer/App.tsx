@@ -182,8 +182,6 @@ export function App() {
     return stored ? Math.max(300, Math.min(800, parseInt(stored, 10) || 400)) : 400;
   });
 
-  // Claude session IDs per terminal (maps terminal session ID to Claude session ID)
-  const [claudeSessionIds, setClaudeSessionIds] = useState<Map<string, string>>(new Map());
 
   // Error notification state (maps session ID to notification)
   const [errorNotifications, setErrorNotifications] = useState<Map<string, ErrorNotification>>(new Map());
@@ -460,15 +458,9 @@ export function App() {
   // Handle session close (from terminal exit)
   const handleSessionClose = useCallback(
     (sessionId: string) => {
-      // Clean up AI TUI tracking and Claude session association
+      // Clean up AI TUI tracking
       aiTuiActiveSessionsRef.current.delete(sessionId);
       sessionProcessRef.current.delete(sessionId);
-      setClaudeSessionIds((prev) => {
-        if (!prev.has(sessionId)) return prev;
-        const next = new Map(prev);
-        next.delete(sessionId);
-        return next;
-      });
 
       // If the closed session was the Claude panel session, clear it
       setClaudePanelSessionId((prev) => (prev === sessionId ? null : prev));
@@ -1350,17 +1342,6 @@ export function App() {
     });
   }, []);
 
-  // Listen for Claude session ID changes (emitted by terminal-bridge when AI invocation captures session ID)
-  useEffect(() => {
-    const cleanup = window.terminalAPI.onClaudeSessionChanged((data) => {
-      setClaudeSessionIds((prev) => {
-        const next = new Map(prev);
-        next.set(data.sessionId, data.claudeSessionId);
-        return next;
-      });
-    });
-    return cleanup;
-  }, []);
 
   // IDE protocol: listen for openFile and openDiff commands from Claude Code
   useEffect(() => {
@@ -1637,7 +1618,7 @@ export function App() {
       <SmartStatusBar
         mcpAttachedSessionId={mcpAttachedSessionId}
         focusedSessionId={focusedSessionId}
-        claudeSessionId={focusedSessionId ? claudeSessionIds.get(focusedSessionId) ?? null : null}
+
         workspace={workspace}
         activeSidebarPlugin={activeSidebarPlugin}
         onTogglePlugin={togglePlugin}

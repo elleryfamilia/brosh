@@ -167,11 +167,6 @@ function registerIpcHandlers(wm: WindowManager): void {
     return bridge.setClaudeModel(model as "haiku" | "sonnet" | "opus");
   });
 
-  ipcMain.handle("ai:getClaudeSessionId", (event, terminalSessionId: string) => {
-    const bridge = wm.getBridge(event.sender);
-    if (!bridge) return null;
-    return bridge.getClaudeSessionId(terminalSessionId);
-  });
 
   ipcMain.handle("terminal:setSandboxMode", async (event, config) => {
     const bridge = wm.getBridge(event.sender);

@@ -1105,13 +1105,6 @@ export class TerminalBridge {
     return ctx;
   }
 
-  /**
-   * Get the Claude session ID for a terminal session (if any)
-   */
-  public getClaudeSessionId(sessionId: string): string | null {
-    const ctx = this.sessionAIContexts.get(sessionId);
-    return ctx?.backendSessions["claude"] ?? null;
-  }
 
   /**
    * Invoke AI CLI for a session
@@ -1244,13 +1237,6 @@ export class TerminalBridge {
           aiContext.backendSessions["claude"] = newSessionId;
           currentClaudeSessionId = newSessionId;
 
-          // Notify renderer that a Claude session ID was captured
-          if (!this.disposed && this.window && !this.window.isDestroyed()) {
-            this.window.webContents.send("terminal:claudeSessionChanged", {
-              sessionId,
-              claudeSessionId: newSessionId,
-            });
-          }
         },
         onToolCall: () => {},
       }
