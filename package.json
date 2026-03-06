@@ -1,6 +1,6 @@
 {
   "name": "brosh",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Terminal MCP bridge for AI-powered development",
   "author": "Ellery Familia",
   "repository": {
