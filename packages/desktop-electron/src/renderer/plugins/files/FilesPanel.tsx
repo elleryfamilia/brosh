@@ -270,14 +270,15 @@ export function FilesPanel({ context, width, onResize, onClose }: PanelProps) {
     setCtxMenu({ isOpen: true, position: { x: e.clientX, y: e.clientY }, groups: filtered });
   }, [root, expandDir, startRename]);
 
-  // Auto-focus rename input
+  // Auto-focus rename input (only on initial mount)
   const renameRefCallback = useCallback((el: HTMLInputElement | null) => {
     if (el) {
       el.focus();
-      const lastDot = renameValue.lastIndexOf('.');
-      el.setSelectionRange(0, lastDot > 0 ? lastDot : renameValue.length);
+      const val = el.value;
+      const lastDot = val.lastIndexOf('.');
+      el.setSelectionRange(0, lastDot > 0 ? lastDot : val.length);
     }
-  }, [renameValue]);
+  }, []);
 
   // --- Drag and drop ---
   const handleDragStart = useCallback((e: React.DragEvent, entry: DirEntry) => {
