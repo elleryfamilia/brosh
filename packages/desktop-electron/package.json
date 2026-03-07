@@ -188,7 +188,12 @@
       "executableName": "brosh"
     },
     "deb": {
-      "afterInstall": "build/afterInstall-linux.sh"
+      "afterInstall": "build/afterInstall-linux.sh",
+      "recommends": [
+        "bubblewrap",
+        "socat",
+        "ripgrep"
+      ]
     }
   }
 }

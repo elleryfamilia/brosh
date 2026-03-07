@@ -1411,12 +1411,27 @@ export class TerminalBridge {
   }
 
   /**
+   * Check if sandbox dependencies are available on this platform
+   */
+  checkSandboxAvailability(): { supported: boolean; missingDeps?: string[] } {
+    const controller = new SandboxController();
+    if (!controller.isSupported()) {
+      return { supported: false, missingDeps: ["Platform not supported"] };
+    }
+    const depCheck = controller.checkLinuxDependencies();
+    if (!depCheck.supported) {
+      const missingDeps = depCheck.message?.split("; ") ?? ["Unknown dependency issue"];
+      return { supported: false, missingDeps };
+    }
+    return { supported: true };
+  }
+
+  /**
    * Set sandbox mode configuration
    */
   async setSandboxMode(config: SandboxConfig): Promise<{ success: boolean; error?: string }> {
     debug("Setting sandbox mode with config:", config);
     this.sandboxConfig = config;
-    this.useSandboxMode = true;
 
     // Convert SandboxConfig to SandboxPermissions format
     const permissions: SandboxPermissions = {
@@ -1439,12 +1454,17 @@ export class TerminalBridge {
 
     if (!status.enabled) {
       console.warn("[terminal-bridge] Sandbox not enabled:", status.reason);
+      // Reset state so session creation doesn't try to use a broken sandbox
+      this.sandboxController = null;
+      this.sandboxConfig = null;
+      this.useSandboxMode = false;
       return {
         success: false,
         error: status.reason || "Failed to initialize sandbox",
       };
     }
 
+    this.useSandboxMode = true;
     return { success: true };
   }
 

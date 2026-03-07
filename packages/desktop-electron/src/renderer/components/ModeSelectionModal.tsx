@@ -95,6 +95,7 @@ export const ModeSelectionModal: React.FC<ModeSelectionModalProps> = ({
   const [allowedDomains, setAllowedDomains] = useState<string>('');
   const [newPath, setNewPath] = useState<string>('');
   const [showPlatformWarning] = useState(navigator.platform.toLowerCase().includes('win'));
+  const [sandboxUnavailable, setSandboxUnavailable] = useState<string[] | null>(null);
 
   // Navigation state
   const [navTarget, setNavTarget] = useState<NavTarget>({ section: 'mode', index: 0 });
@@ -344,10 +345,20 @@ export const ModeSelectionModal: React.FC<ModeSelectionModalProps> = ({
     }
   }, [isOpen, showLogo]);
 
-  // Fade out logo when sandbox mode is selected (modal expands)
+  // Check sandbox availability when sandbox mode is selected
   useEffect(() => {
     if (selectedMode === 'sandbox') {
       handleInteraction();
+      // Check dependencies on selection
+      window.terminalAPI.checkSandboxAvailability().then(result => {
+        if (!result.supported) {
+          setSandboxUnavailable(result.missingDeps ?? ['Unknown issue']);
+        } else {
+          setSandboxUnavailable(null);
+        }
+      }).catch(() => {
+        setSandboxUnavailable(null);
+      });
     }
   }, [selectedMode]);
 
@@ -541,6 +552,16 @@ export const ModeSelectionModal: React.FC<ModeSelectionModalProps> = ({
               {showPlatformWarning && (
                 <div className="tui-warning">
                   ⚠ Sandbox not supported on Windows
+                </div>
+              )}
+              {sandboxUnavailable && !showPlatformWarning && (
+                <div className="tui-warning">
+                  ⚠ Sandbox dependencies missing: {sandboxUnavailable.join(', ')}
+                  {sandboxUnavailable.some(d => d.includes('bwrap') || d.includes('bubblewrap') || d.includes('socat') || d.includes('ripgrep')) && (
+                    <div className="tui-warning-hint">
+                      Install with: sudo apt install bubblewrap socat ripgrep
+                    </div>
+                  )}
                 </div>
               )}
 

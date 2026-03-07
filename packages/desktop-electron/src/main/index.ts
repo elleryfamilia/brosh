@@ -168,6 +168,12 @@ function registerIpcHandlers(wm: WindowManager): void {
   });
 
 
+  ipcMain.handle("terminal:checkSandboxAvailability", async (event) => {
+    const bridge = wm.getBridge(event.sender);
+    if (!bridge) return { supported: false, missingDeps: ["Window not found"] };
+    return bridge.checkSandboxAvailability();
+  });
+
   ipcMain.handle("terminal:setSandboxMode", async (event, config) => {
     const bridge = wm.getBridge(event.sender);
     if (!bridge) return { success: false, error: "Window not found" };
@@ -1669,6 +1675,7 @@ function removeIpcHandlers(): void {
   ipcMain.removeHandler("terminal:isActive");
   ipcMain.removeHandler("terminal:list");
   ipcMain.removeHandler("terminal:getProcess");
+  ipcMain.removeHandler("terminal:checkSandboxAvailability");
   ipcMain.removeHandler("terminal:setSandboxMode");
 
   // Shell handlers

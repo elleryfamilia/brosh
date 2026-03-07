@@ -116,7 +116,8 @@ export interface TerminalAPI {
   onMcpSocketLost: (callback: (data: McpSocketLost) => void) => () => void;
 
   // Sandbox mode
-  setSandboxMode: (config: SandboxConfig) => Promise<void>;
+  checkSandboxAvailability: () => Promise<{ supported: boolean; missingDeps?: string[] }>;
+  setSandboxMode: (config: SandboxConfig) => Promise<{ success: boolean; error?: string }>;
 
   // Settings
   getSettings: () => Promise<AppSettings>;

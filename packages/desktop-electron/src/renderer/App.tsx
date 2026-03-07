@@ -297,11 +297,9 @@ export function App() {
   const createTerminalSession = useCallback(
     async (mode: "direct" | "sandbox", config?: SandboxConfig) => {
       if (mode === "sandbox" && config) {
-        try {
-          await window.terminalAPI.setSandboxMode(config);
-        } catch (err) {
-          console.error("Failed to set sandbox mode:", err);
-          throw err;
+        const result = await window.terminalAPI.setSandboxMode(config);
+        if (!result.success) {
+          throw new Error(result.error || "Failed to initialize sandbox");
         }
       }
 

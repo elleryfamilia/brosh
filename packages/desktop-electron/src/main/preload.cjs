@@ -105,6 +105,7 @@ contextBridge.exposeInMainWorld("terminalAPI", {
   },
 
   // Sandbox mode
+  checkSandboxAvailability: () => ipcRenderer.invoke("terminal:checkSandboxAvailability"),
   setSandboxMode: (config) => ipcRenderer.invoke("terminal:setSandboxMode", config),
 
   // Settings
