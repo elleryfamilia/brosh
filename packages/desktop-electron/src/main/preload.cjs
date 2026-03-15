@@ -153,6 +153,18 @@ contextBridge.exposeInMainWorld("terminalAPI", {
     };
   },
 
+  // Window title (for Window menu list)
+  setWindowTitle: (title) => ipcRenderer.send("window:setTitle", title),
+
+  // Zoom level changes
+  onZoomChanged: (callback) => {
+    const handler = (_event, percent) => callback(percent);
+    ipcRenderer.on("zoom:changed", handler);
+    return () => {
+      ipcRenderer.removeListener("zoom:changed", handler);
+    };
+  },
+
   // Menu events
   onMenuPreferences: (callback) => {
     const handler = () => callback();

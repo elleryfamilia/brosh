@@ -1,7 +1,7 @@
 {
   "name": "brosh-desktop",
   "productName": "brosh",
-  "version": "0.1.1",
+  "version": "0.1.9",
   "description": "Desktop GUI for brosh - A terminal emulator with MCP support",
   "author": {
     "name": "Ellery Familia",
@@ -31,7 +31,7 @@
     "postpackage": "rm -rf node_modules/brosh && npm install",
     "download-models": "node scripts/download-models.js",
     "prepare-sandbox-bins": "node scripts/prepare-sandbox-bins.js",
-    "postinstall": "node scripts/download-models.js",
+    "postinstall": "node scripts/download-models.js && node scripts/fix-dev-entitlements.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -172,7 +172,8 @@
       "notarize": true,
       "extendInfo": {
         "NSSupportsAutomaticTermination": false,
-        "NSSupportsSuddenTermination": false
+        "NSSupportsSuddenTermination": false,
+        "NSMicrophoneUsageDescription": "brosh needs microphone access for voice input features."
       }
     },
     "win": {

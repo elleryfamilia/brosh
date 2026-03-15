@@ -8048,6 +8048,30 @@ body,
   background: var(--surface-0);
 }
 
+/* ==================== Zoom Level Overlay ==================== */
+.zoom-overlay {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 32px;
+  font-weight: 600;
+  padding: 12px 28px;
+  border-radius: 10px;
+  z-index: 99999;
+  pointer-events: none;
+  animation: zoom-overlay-fade 1.5s ease-in-out forwards;
+}
+
+@keyframes zoom-overlay-fade {
+  0% { opacity: 0; }
+  10% { opacity: 1; }
+  70% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
 .files-editor-header {
   display: flex;
   align-items: center;

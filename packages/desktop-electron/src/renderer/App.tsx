@@ -25,6 +25,7 @@ import { ContextMenu } from "./components/ContextMenu";
 import type { ContextMenuGroup } from "./components/ContextMenu";
 import type { TerminalMethods } from "./components/Terminal";
 import { FindBar } from "./components/FindBar";
+import { ZoomOverlay } from "./components/ZoomOverlay";
 import { useSettings } from "./settings";
 const SettingsPanel = lazy(() =>
   import("./settings/SettingsPanel").then(m => ({ default: m.SettingsPanel }))
@@ -155,6 +156,11 @@ export function App() {
   // Settings panel state
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
 
+  // Zoom overlay state
+  const [zoomPercent, setZoomPercent] = useState<number | null>(null);
+  const [zoomKey, setZoomKey] = useState(0);
+  const zoomTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Sidebar plugin state
   const [activeSidebarPlugin, setActiveSidebarPlugin] = useState<string | null>(null);
   const [sidebarWidth, setSidebarWidth] = useState(0);
@@ -213,6 +219,7 @@ export function App() {
   // Find bar state
   const [showFindBar, setShowFindBar] = useState(false);
   const findBarTerminalMethodsRef = useRef<TerminalMethods | null>(null);
+  const allPaneMethodsRef = useRef<Map<string, TerminalMethods>>(new Map());
   const showFindBarRef = useRef(showFindBar);
   showFindBarRef.current = showFindBar;
 
@@ -470,6 +477,9 @@ export function App() {
       const terminal = terminals.find((t) => t.sessionId === sessionId);
       if (!terminal) return;
 
+      // Clean up stored terminal methods for find bar
+      allPaneMethodsRef.current.delete(terminal.id);
+
       if (terminals.length === 1) {
         // Last terminal — close the window
         window.close();
@@ -562,10 +572,11 @@ export function App() {
   const setFocusedPane = useCallback((paneId: string) => {
     setFocusedPaneId(paneId);
 
-    // Close find bar when terminal is clicked/focused
     if (showFindBarRef.current) {
-      setShowFindBar(false);
+      // FindBar is open — clear highlights from the old pane and re-target
+      // the new one so the next search goes to the clicked pane.
       findBarTerminalMethodsRef.current?.clearSearch();
+      findBarTerminalMethodsRef.current = allPaneMethodsRef.current.get(paneId) ?? null;
     }
   }, []);
 
@@ -691,8 +702,16 @@ export function App() {
   // Handle terminal methods ready (for find bar)
   const handleTerminalMethodsReady = useCallback(
     (paneId: string, methods: TerminalMethods | null) => {
-      if (paneId === focusedPaneIdRef.current && methods) {
-        findBarTerminalMethodsRef.current = methods;
+      if (methods) {
+        allPaneMethodsRef.current.set(paneId, methods);
+      } else {
+        allPaneMethodsRef.current.delete(paneId);
+      }
+      // Always resolve the focused pane's methods from the map so search
+      // targets the correct pane regardless of effect ordering.
+      const focused = focusedPaneIdRef.current;
+      if (focused) {
+        findBarTerminalMethodsRef.current = allPaneMethodsRef.current.get(focused) ?? null;
       }
     },
     []
@@ -1152,6 +1171,20 @@ export function App() {
     return cleanup;
   }, [addToast]);
 
+  // Listen for zoom level changes
+  useEffect(() => {
+    const cleanup = window.terminalAPI.onZoomChanged((percent: number) => {
+      if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+      setZoomPercent(percent);
+      setZoomKey(k => k + 1);
+      zoomTimerRef.current = setTimeout(() => setZoomPercent(null), 1500);
+    });
+    return () => {
+      cleanup();
+      if (zoomTimerRef.current) clearTimeout(zoomTimerRef.current);
+    };
+  }, []);
+
   // Listen for menu preferences event
   useEffect(() => {
     const cleanup = window.terminalAPI.onMenuPreferences(() => {
@@ -1416,6 +1449,17 @@ export function App() {
   // Alias for status bar and Claude panel props
   const focusedSessionId = currentFocusedSessionId;
 
+  // Sync window title for the native Window menu list
+  useEffect(() => {
+    let title: string;
+    if (showClaudePanel && claudeProjectName) {
+      title = `Claude Code — ${claudeProjectName}`;
+    } else {
+      title = titleBarPaneInfo?.windowTitle || titleBarPaneInfo?.processName || "brosh";
+    }
+    window.terminalAPI.setWindowTitle(title);
+  }, [showClaudePanel, claudeProjectName, titleBarPaneInfo?.windowTitle, titleBarPaneInfo?.processName]);
+
   // Render error state (only if no pane and no modal)
   if (error && !rootPane && !showModeModal) {
     return (
@@ -1466,15 +1510,18 @@ export function App() {
           <FindBar
             isOpen={showFindBar}
             onClose={closeFindBar}
-            onFindNext={(term, opts) =>
-              findBarTerminalMethodsRef.current?.findNext(term, opts) ?? false
-            }
-            onFindPrevious={(term, opts) =>
-              findBarTerminalMethodsRef.current?.findPrevious(term, opts) ?? false
-            }
-            onClearSearch={() =>
-              findBarTerminalMethodsRef.current?.clearSearch()
-            }
+            onFindNext={(term, opts) => {
+              const methods = allPaneMethodsRef.current.get(focusedPaneIdRef.current ?? "") ?? findBarTerminalMethodsRef.current;
+              return methods?.findNext(term, opts) ?? false;
+            }}
+            onFindPrevious={(term, opts) => {
+              const methods = allPaneMethodsRef.current.get(focusedPaneIdRef.current ?? "") ?? findBarTerminalMethodsRef.current;
+              return methods?.findPrevious(term, opts) ?? false;
+            }}
+            onClearSearch={() => {
+              const methods = allPaneMethodsRef.current.get(focusedPaneIdRef.current ?? "") ?? findBarTerminalMethodsRef.current;
+              methods?.clearSearch();
+            }}
           />
         )}
         {activeSidebarPlugin && editorFile && (() => {
@@ -1664,6 +1711,7 @@ export function App() {
         groups={buildContextMenuGroups()}
         onClose={closeContextMenu}
       />
+      <ZoomOverlay key={zoomKey} percent={zoomPercent} />
     </div>
   );
 }

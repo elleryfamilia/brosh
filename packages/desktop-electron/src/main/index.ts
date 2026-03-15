@@ -21,7 +21,7 @@ import os from "os";
 import path from "path";
 import fs from "fs";
 import { execFileSync, spawn, type ChildProcess } from "child_process";
-import { app, BrowserWindow, ipcMain, shell, powerMonitor } from "electron";
+import { app, BrowserWindow, ipcMain, session, shell, powerMonitor, systemPreferences } from "electron";
 import { WindowManager } from "./window-manager.js";
 import { createMenu } from "./menu.js";
 import { initSettingsHandlers } from "./settings-store.js";
@@ -1790,11 +1790,20 @@ app.whenReady().then(async () => {
     console.log("[main] Welcome state reset via --reset-welcome flag");
   }
 
+
   // Initialize analytics (consent-aware)
   initAnalytics();
 
   // Initialize settings IPC handlers
   initSettingsHandlers();
+
+  // Allow media (microphone) permissions when requested by renderer.
+  // Claude Code /voice uses a native CoreAudio module in the child process;
+  // triggering getUserMedia from the renderer is the reliable way to get macOS
+  // TCC to prompt for microphone access on the host app.
+  session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    callback(permission === "media" || permission === "clipboard-read");
+  });
 
   // Create window manager
   windowManager = new WindowManager();
@@ -1809,6 +1818,30 @@ app.whenReady().then(async () => {
   // Create the first window
   await windowManager.createWindow();
   _mark("first window created");
+
+  // Request microphone access so voice features (e.g. Claude Code /voice) work.
+  // Claude Code uses a native CoreAudio module — the macOS TCC permission must
+  // be granted to the host app (Electron/brosh).  We trigger getUserMedia from
+  // the renderer which goes through Chromium's permission path and reliably
+  // triggers the macOS TCC prompt (systemPreferences.askForMediaAccess fails
+  // silently for ad-hoc signed dev builds on macOS Sequoia).
+  if (process.platform === "darwin") {
+    const micStatus = systemPreferences.getMediaAccessStatus("microphone");
+    console.log(`[main] Microphone TCC status: ${micStatus}`);
+    if (micStatus !== "granted") {
+      const firstManaged = windowManager.getAllWindows()[0];
+      if (firstManaged) {
+        firstManaged.window.webContents.executeJavaScript(`
+          navigator.mediaDevices.getUserMedia({ audio: true })
+            .then(stream => {
+              stream.getTracks().forEach(t => t.stop());
+              console.log('[mic] Microphone access granted');
+            })
+            .catch(err => console.warn('[mic] Microphone access denied:', err.message));
+        `).catch(() => {});
+      }
+    }
+  }
 
   // Log startup timings
   console.log("\n[startup] Timing breakdown:");

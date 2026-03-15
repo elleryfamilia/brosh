@@ -2,6 +2,7 @@
  * Application Menu
  *
  * Defines the native menu bar for the application.
+ * Rebuilt dynamically when windows are created/closed/renamed.
  */
 
 import { app, BrowserWindow, Menu, shell, type MenuItemConstructorOptions } from "electron";
@@ -21,7 +22,26 @@ function getActiveWindow(windowManager: WindowManager): BrowserWindow | null {
   return windows.length > 0 ? windows[0].window : null;
 }
 
+let currentWindowManager: WindowManager | null = null;
+let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * Rebuild the application menu (debounced, call when windows change)
+ */
+export function rebuildMenu(): void {
+  if (!currentWindowManager) return;
+  if (rebuildTimer) clearTimeout(rebuildTimer);
+  rebuildTimer = setTimeout(() => {
+    rebuildTimer = null;
+    if (currentWindowManager) {
+      createMenu(currentWindowManager);
+    }
+  }, 50);
+}
+
 export function createMenu(windowManager: WindowManager): void {
+  currentWindowManager = windowManager;
+
   // Helper to send to active window
   const sendToActive = (channel: string) => {
     const window = getActiveWindow(windowManager);
@@ -29,6 +49,27 @@ export function createMenu(windowManager: WindowManager): void {
       window.webContents.send(channel);
     }
   };
+
+  // Build window list for Window menu (Cmd+1 through Cmd+9 shortcuts)
+  const allWindows = windowManager.getAllWindows();
+  const windowListItems: MenuItemConstructorOptions[] = allWindows.map((managed, index) => {
+    const win = managed.window;
+    const title = win.getTitle() || `Window ${index + 1}`;
+    const isFocused = win === BrowserWindow.getFocusedWindow();
+    return {
+      label: title,
+      type: "checkbox" as const,
+      checked: isFocused,
+      ...(index < 9 ? { accelerator: `CmdOrCtrl+${index + 1}` } : {}),
+      click: () => {
+        if (!win.isDestroyed()) {
+          win.show();
+          win.focus();
+        }
+      },
+    };
+  });
+
   const template: MenuItemConstructorOptions[] = [
     // App menu (macOS only)
     ...(isMac
@@ -161,6 +202,12 @@ export function createMenu(windowManager: WindowManager): void {
         ...(isMac
           ? [{ type: "separator" as const }, { role: "front" as const }]
           : [{ role: "close" as const }]),
+        ...(windowListItems.length > 0
+          ? [
+              { type: "separator" as const },
+              ...windowListItems,
+            ]
+          : []),
       ],
     },
 

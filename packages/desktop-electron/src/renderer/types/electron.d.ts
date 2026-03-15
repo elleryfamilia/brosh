@@ -135,6 +135,12 @@ export interface TerminalAPI {
   // Autocomplete suggestion feedback (shown while typing)
   onAutocomplete: (callback: (data: AutocompleteChange) => void) => () => void;
 
+  // Window title (for Window menu list)
+  setWindowTitle: (title: string) => void;
+
+  // Zoom level changes
+  onZoomChanged: (callback: (percent: number) => void) => () => void;
+
   // Menu events
   onMenuPreferences: (callback: () => void) => () => void;
   onMenuCloseTerminal: (callback: () => void) => () => void;

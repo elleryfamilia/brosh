@@ -5,13 +5,14 @@
  * Each window has its own TerminalBridge, but MCP is app-scoped.
  */
 
-import { app, BrowserWindow, type WebContents } from "electron";
+import { app, BrowserWindow, ipcMain, type WebContents } from "electron";
 import * as path from "path";
 import { TerminalBridge } from "./terminal-bridge.js";
 import { McpServer } from "./mcp-server.js";
 import { IdeProtocolServer } from "./ide-protocol.js";
 import { getWindowState, trackWindowState } from "./window-state.js";
 import { getSettings } from "./settings-store.js";
+import { rebuildMenu } from "./menu.js";
 
 // Development mode check
 const isDev = process.env.ELECTRON_DEV === "true";
@@ -46,11 +47,24 @@ export class WindowManager {
   private mcpServer: McpServer | null = null;
   private ideProtocolServer: IdeProtocolServer | null = null;
   private disposed = false;
+  private ipcRegistered = false;
 
   /**
    * Create a new application window with its own terminal bridge
    */
   async createWindow(): Promise<BrowserWindow> {
+    // Register IPC handlers once
+    if (!this.ipcRegistered) {
+      this.ipcRegistered = true;
+      ipcMain.on("window:setTitle", (event, title: string) => {
+        const win = BrowserWindow.fromWebContents(event.sender);
+        if (win && !win.isDestroyed()) {
+          win.setTitle(title);
+          rebuildMenu();
+        }
+      });
+    }
+
     // Get saved window state (for first window) or offset for subsequent windows
     const windowState = getWindowState();
     const existingCount = this.windows.size;
@@ -127,6 +141,7 @@ export class WindowManager {
     // Handle window close
     window.on("closed", () => {
       this.handleWindowClosed(windowId);
+      rebuildMenu();
     });
 
     // Handle window resize
@@ -139,6 +154,7 @@ export class WindowManager {
       this.broadcast('window:focus-changed', { focused: true });
       const managed = this.windows.get(windowId);
       managed?.bridge.setWindowFocused(true);
+      rebuildMenu();
     });
 
     window.on('blur', () => {
@@ -147,6 +163,25 @@ export class WindowManager {
       managed?.bridge.setWindowFocused(false);
     });
 
+    // Detect zoom keyboard shortcuts and notify renderer
+    window.webContents.on('before-input-event', (_event, input) => {
+      if (input.type !== 'keyDown') return;
+      const isMod = process.platform === 'darwin' ? input.meta : input.control;
+      if (!isMod || input.alt) return;
+
+      const isZoomKey = input.key === '=' || input.key === '+' || input.key === '-' || input.key === '0';
+      if (!isZoomKey) return;
+
+      // Defer to read zoom level after the role-based handler fires
+      setTimeout(() => {
+        if (window.isDestroyed()) return;
+        const level = window.webContents.getZoomLevel();
+        const percent = Math.round(Math.pow(1.2, level) * 100);
+        window.webContents.send('zoom:changed', percent);
+      }, 50);
+    });
+
+    rebuildMenu();
     return window;
   }
 

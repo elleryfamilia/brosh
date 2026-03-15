@@ -801,6 +801,13 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
         const saved = savedNormalBufferScrollRef.current;
         const normalBuffer = xterm.buffer.normal;
 
+        // Immediately restore userScrolledBackRef from the saved state.
+        // Without this, handleScroll fires during the transient buffer switch
+        // and sees viewportY=0 (stale), incorrectly marking the user as
+        // "scrolled back". handleOutput then pins viewport.scrollTop at 0
+        // (top of scrollback), causing the jump-to-top bug.
+        userScrolledBackRef.current = saved ? !saved.wasAtBottom : false;
+
         requestAnimationFrame(() => {
           if (!saved) {
             return;
