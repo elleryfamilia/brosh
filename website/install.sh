@@ -41,25 +41,3 @@ fi
 
 rm -f "$TMP_DEB"
 echo "brosh v${VERSION} installed successfully."
-
-# Install sandbox dependencies (bubblewrap, socat, ripgrep)
-# These are required for sandbox mode to work
-MISSING_DEPS=""
-command -v bwrap >/dev/null 2>&1 || MISSING_DEPS="bubblewrap"
-command -v socat >/dev/null 2>&1 || MISSING_DEPS="$MISSING_DEPS socat"
-command -v rg >/dev/null 2>&1    || MISSING_DEPS="$MISSING_DEPS ripgrep"
-
-if [ -n "$MISSING_DEPS" ]; then
-  echo ""
-  echo "Installing sandbox dependencies:$MISSING_DEPS"
-  if command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get install -y $MISSING_DEPS
-  elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y $MISSING_DEPS
-  elif command -v pacman >/dev/null 2>&1; then
-    sudo pacman -S --noconfirm $MISSING_DEPS
-  else
-    echo "Warning: could not auto-install sandbox dependencies."
-    echo "Please install manually: $MISSING_DEPS"
-  fi
-fi
