@@ -89,17 +89,13 @@ export function ClaudeWorktreePicker({
   const handleRemoveWorktree = useCallback(async (e: React.MouseEvent, wt: GitWorktree) => {
     e.stopPropagation();
     e.preventDefault();
-    console.log("[worktree-picker] removing worktree:", wt.path);
     try {
       const result = await window.terminalAPI.gitRemoveWorktree(wt.path);
-      console.log("[worktree-picker] remove result:", result);
       if (result.success) {
         setWorktrees((prev) => prev.filter((w) => w.path !== wt.path));
-      } else {
-        console.error("[worktree-picker] Failed to remove worktree:", result.error);
       }
-    } catch (err) {
-      console.error("[worktree-picker] Exception removing worktree:", err);
+    } catch {
+      // Removal failed — leave the worktree in the list
     }
   }, []);
 

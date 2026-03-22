@@ -208,16 +208,17 @@ export function ClaudePanel({
 
   const handleCloseTab = useCallback(
     (tabId: string) => {
+      // Extract session ID and kill outside the state updater to avoid
+      // side effects running twice in React Strict Mode.
       setTabs((prev) => {
         const tab = prev.find((t) => t.id === tabId);
-        // Kill the session if it's still running
         if (tab?.sessionId) {
-          window.terminalAPI.input(tab.sessionId, "\x03");
-          setTimeout(() => {
-            if (tab.sessionId) {
-              window.terminalAPI.input(tab.sessionId, "exit\n");
-            }
-          }, 100);
+          const sid = tab.sessionId;
+          // Schedule IPC outside updater via microtask
+          queueMicrotask(() => {
+            window.terminalAPI.input(sid, "\x03");
+            setTimeout(() => window.terminalAPI.input(sid, "exit\n"), 100);
+          });
         }
 
         const remaining = prev.filter((t) => t.id !== tabId);

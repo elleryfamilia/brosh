@@ -973,18 +973,8 @@ function registerIpcHandlers(wm: WindowManager): void {
       return { success: true };
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
-      // If it has modifications, try with --force
-      if (msg.includes("contains modified or untracked files")) {
-        try {
-          await execFileAsync("git", ["worktree", "remove", "--force", worktreePath], {
-            encoding: "utf8",
-            timeout: 10000,
-          });
-          return { success: true };
-        } catch (err2: unknown) {
-          return { success: false, error: err2 instanceof Error ? err2.message : String(err2) };
-        }
-      }
+      // Surface the error to the renderer so it can prompt the user
+      // instead of silently force-removing uncommitted work.
       return { success: false, error: msg };
     }
   });
@@ -1238,7 +1228,7 @@ function registerIpcHandlers(wm: WindowManager): void {
               sessionId,
               cwd: projectCwd,
               startedAt: 0,
-              alive: true, // Recently modified JSONL = likely active
+              alive: false, // No PID available — can't verify liveness
               projectName: projectCwd.split("/").pop() || projectCwd,
               gitBranch,
               gitCommonDir,
