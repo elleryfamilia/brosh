@@ -252,10 +252,10 @@ export function FilesPanel({ context, width, onResize, onClose }: PanelProps) {
       id: 'clipboard',
       items: [
         ...(entry ? [
-          { id: 'copy-path', label: 'Copy Path', onClick: () => navigator.clipboard.writeText(entry.path) },
+          { id: 'copy-path', label: 'Copy Path', onClick: () => window.terminalAPI.clipboardWriteText(entry.path) },
           { id: 'copy-relative', label: 'Copy Relative Path', onClick: () => {
             const rel = root && entry.path.startsWith(root + '/') ? entry.path.slice(root.length + 1) : entry.path;
-            navigator.clipboard.writeText(rel);
+            window.terminalAPI.clipboardWriteText(rel);
           }},
           { id: 'reveal', label: 'Reveal in Finder', onClick: () => {
             window.terminalAPI.showInFolder(entry.path);

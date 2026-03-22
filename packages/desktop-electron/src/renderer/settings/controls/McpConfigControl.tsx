@@ -28,26 +28,18 @@ export function McpConfigControl() {
     }
   };
 
-  const handleCopyPath = useCallback(async () => {
+  const handleCopyPath = useCallback(() => {
     if (mcpStatus?.socketPath) {
-      try {
-        await navigator.clipboard.writeText(mcpStatus.socketPath);
-        setCopied('path');
-        setTimeout(() => setCopied(null), 2000);
-      } catch (err) {
-        console.error('Failed to copy:', err);
-      }
+      window.terminalAPI.clipboardWriteText(mcpStatus.socketPath);
+      setCopied('path');
+      setTimeout(() => setCopied(null), 2000);
     }
   }, [mcpStatus?.socketPath]);
 
-  const handleCopyConfig = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(mcpConfig, null, 2));
-      setCopied('config');
-      setTimeout(() => setCopied(null), 2000);
-    } catch (err) {
-      console.error('Failed to copy:', err);
-    }
+  const handleCopyConfig = useCallback(() => {
+    window.terminalAPI.clipboardWriteText(JSON.stringify(mcpConfig, null, 2));
+    setCopied('config');
+    setTimeout(() => setCopied(null), 2000);
   }, []);
 
   return (

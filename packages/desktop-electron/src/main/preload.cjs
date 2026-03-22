@@ -6,10 +6,14 @@
  * but exposes only specific, safe functionality to the renderer.
  */
 
-const { contextBridge, ipcRenderer, webUtils } = require("electron");
+const { contextBridge, ipcRenderer, webUtils, clipboard } = require("electron");
 
 // Expose the API to the renderer
 contextBridge.exposeInMainWorld("terminalAPI", {
+  // Clipboard (uses Electron's clipboard module — no focus/permission requirement)
+  clipboardWriteText: (text) => clipboard.writeText(text),
+  clipboardReadText: () => clipboard.readText(),
+
   // Session management
   createSession: (options) => ipcRenderer.invoke("terminal:create", options),
   closeSession: (sessionId) => ipcRenderer.invoke("terminal:close", sessionId),

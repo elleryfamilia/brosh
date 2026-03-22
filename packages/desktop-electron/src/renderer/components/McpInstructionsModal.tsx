@@ -29,14 +29,10 @@ export function McpInstructionsModal({
 }: McpInstructionsModalProps) {
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(mcpJson);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error("Failed to copy to clipboard:", err);
-    }
+  const handleCopy = useCallback(() => {
+    window.terminalAPI.clipboardWriteText(mcpJson);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   }, []);
 
   const handleOverlayClick = useCallback(() => {
