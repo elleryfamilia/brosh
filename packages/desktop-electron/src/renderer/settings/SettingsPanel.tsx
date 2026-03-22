@@ -126,8 +126,9 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
 
   // Check if Claude Code is installed
   const [claudeCodeInstalled, setClaudeCodeInstalled] = useState<boolean | null>(null);
+  const [agentTeamsEnabled, setAgentTeamsEnabled] = useState(false);
 
-  // Check Claude Code installation status when panel opens
+  // Check Claude Code installation status and agent teams when panel opens
   useEffect(() => {
     if (isOpen) {
       // @ts-expect-error - terminalAPI is injected by preload
@@ -139,6 +140,9 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
           console.error('Failed to check Claude Code status:', err);
           setClaudeCodeInstalled(false);
         });
+      window.terminalAPI.claudeGetAgentTeams().then((result) => {
+        if (result.success) setAgentTeamsEnabled(result.enabled);
+      });
     }
   }, [isOpen]);
 
@@ -432,6 +436,17 @@ export function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                 }
               />
             </div>
+
+            <ToggleControl
+              label="Agent Teams (Experimental)"
+              description="Enable Claude Code agent teams — ask Claude to create a team of collaborating agents. Requires relaunch of Claude sessions."
+              value={agentTeamsEnabled}
+              onChange={(enabled) => {
+                setAgentTeamsEnabled(enabled);
+                window.terminalAPI.claudeSetAgentTeams(enabled);
+              }}
+              disabled={claudeCodeInstalled === false}
+            />
 
             <div className="setting-help">
               <strong>Usage tips:</strong>
