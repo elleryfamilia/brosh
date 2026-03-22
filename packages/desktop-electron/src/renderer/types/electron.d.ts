@@ -42,6 +42,10 @@ export interface SandboxConfig {
 }
 
 export interface TerminalAPI {
+  // Clipboard (uses Electron's clipboard module — no focus/permission requirement)
+  clipboardWriteText: (text: string) => void;
+  clipboardReadText: () => string;
+
   // Session management
   createSession: (options?: {
     cols?: number;

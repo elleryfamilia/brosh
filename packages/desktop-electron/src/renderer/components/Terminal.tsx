@@ -508,7 +508,7 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       // Cmd/Ctrl+C - smart copy/SIGINT
       if (isMod && event.key === "c" && !event.shiftKey) {
         if (xterm.hasSelection()) {
-          navigator.clipboard.writeText(xterm.getSelection());
+          window.terminalAPI.clipboardWriteText(xterm.getSelection());
           return false; // Prevent xterm handling, we copied
         }
         return true; // Let through for SIGINT (no selection)
@@ -518,7 +518,7 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       if (isMod && event.shiftKey && event.key.toLowerCase() === "c") {
         const selection = xterm.getSelection();
         if (selection) {
-          navigator.clipboard.writeText(selection);
+          window.terminalAPI.clipboardWriteText(selection);
         }
         return false;
       }
@@ -526,22 +526,20 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       // Cmd/Ctrl+V - paste
       if (isMod && event.key === "v" && !event.shiftKey) {
         event.preventDefault(); // Prevent browser's default paste
-        navigator.clipboard.readText().then((text) => {
-          if (text) {
-            window.terminalAPI.input(sessionId, text).catch(console.error);
-          }
-        });
+        const text = window.terminalAPI.clipboardReadText();
+        if (text) {
+          window.terminalAPI.input(sessionId, text).catch(console.error);
+        }
         return false;
       }
 
       // Cmd/Ctrl+Shift+V - paste (alternative shortcut, same behavior)
       if (isMod && event.shiftKey && event.key.toLowerCase() === "v") {
         event.preventDefault(); // Prevent browser's default paste
-        navigator.clipboard.readText().then((text) => {
-          if (text) {
-            window.terminalAPI.input(sessionId, text).catch(console.error);
-          }
-        });
+        const text = window.terminalAPI.clipboardReadText();
+        if (text) {
+          window.terminalAPI.input(sessionId, text).catch(console.error);
+        }
         return false;
       }
 
@@ -1375,19 +1373,15 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       if (xtermRef.current) {
         const selection = xtermRef.current.getSelection();
         if (selection) {
-          navigator.clipboard.writeText(selection);
+          window.terminalAPI.clipboardWriteText(selection);
         }
       }
     },
     paste: async () => {
       if (xtermRef.current) {
-        try {
-          const text = await navigator.clipboard.readText();
-          if (text) {
-            window.terminalAPI.input(sessionId, text).catch(console.error);
-          }
-        } catch (err) {
-          console.error("Failed to paste:", err);
+        const text = window.terminalAPI.clipboardReadText();
+        if (text) {
+          window.terminalAPI.input(sessionId, text).catch(console.error);
         }
       }
     },
