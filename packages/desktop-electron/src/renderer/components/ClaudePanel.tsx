@@ -1,24 +1,19 @@
 /**
  * Claude Code Side Panel Component
  *
- * Right-side panel that hosts a Claude Code CLI session.
- * On first open, shows a permissions prompt. On subsequent opens,
- * restores the existing session or re-launches if the session exited.
+ * Right-side panel that hosts Claude Code CLI sessions with tab support.
+ * Layer 0: Single tab (no tab bar visible) — identical to original behavior.
+ * Layer 1: Multiple tabs with tab bar — one per worktree or directory.
+ *
+ * Tabs stay mounted (display:none when inactive) to preserve terminal state.
  */
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Terminal } from "./Terminal";
-import { ClaudePermissionsPrompt } from "./ClaudePermissionsPrompt";
+import { ClaudeTabContent } from "./ClaudeTabContent";
+import { ClaudeTabBar } from "./ClaudeTabBar";
+import { ClaudeWorktreePicker } from "./ClaudeWorktreePicker";
 import { ClaudeIcon } from "./icons/ClaudeIcon";
-import { useSettings } from "../settings";
-
-/** Escape a path for safe shell usage (single-quote wrapping). */
-function shellEscape(p: string): string {
-  if (/[^a-zA-Z0-9_./-]/.test(p)) {
-    return `'${p.replace(/'/g, "'\\''")}'`;
-  }
-  return p;
-}
+import type { ClaudeTab, GitWorktree, PersistedClaudeTab } from "../types/claude-tab";
 
 /** Extract a display-friendly version string: "2.1.41 (Claude Code)" → "v2.1.41" */
 function formatVersion(raw: string): string {
@@ -26,17 +21,38 @@ function formatVersion(raw: string): string {
   return match ? `v${match[0]}` : raw;
 }
 
-/** Extract a display-friendly directory name from a full path. */
-function dirName(p: string): string {
-  return p.split('/').pop() ?? p;
+/** Generate a unique tab ID */
+function genTabId(): string {
+  return `ct-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 }
 
-/** Shell process names — when Claude exits, the foreground process returns to one of these. */
-const SHELL_NAMES = new Set(['bash', 'zsh', 'fish', 'sh', 'dash', 'ksh', 'tcsh', 'csh', '-bash', '-zsh', '-fish', '-sh']);
+const STORAGE_KEY = "claudeTabs";
+
+/** Load persisted tabs from localStorage */
+function loadPersistedTabs(): PersistedClaudeTab[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Save tab metadata to localStorage */
+function persistTabs(tabs: ClaudeTab[]) {
+  const data: PersistedClaudeTab[] = tabs.map((t) => ({
+    id: t.id,
+    label: t.label,
+    cwd: t.cwd,
+    worktreeName: t.worktreeName,
+  }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
 
 interface ClaudePanelProps {
+  /** Active tab's session ID (backwards-compat with App.tsx handleAddToChat) */
   sessionId: string | null;
-  onSessionCreated: (sessionId: string) => void;
+  onSessionCreated: (sessionId: string | null) => void;
   width: number;
   onResize: (width: number) => void;
   onClose: () => void;
@@ -48,7 +64,7 @@ interface ClaudePanelProps {
 }
 
 export function ClaudePanel({
-  sessionId,
+  sessionId: _legacySessionId,
   onSessionCreated,
   width,
   onResize,
@@ -58,21 +74,73 @@ export function ClaudePanel({
   projectName,
   focusedSessionId,
 }: ClaudePanelProps) {
-  const [launching, setLaunching] = useState(false);
-  const [showPrompt, setShowPrompt] = useState(false);
-  const [claudeInfo, setClaudeInfo] = useState<{ model: string | null; version: string | null }>({ model: null, version: null });
+  const [claudeInfo, setClaudeInfo] = useState<{ model: string | null; version: string | null }>({
+    model: null,
+    version: null,
+  });
   // Sticky project name: captured at launch time so it doesn't change when the user switches terminal panes
   const [stickyProjectName, setStickyProjectName] = useState<string | null>(null);
-  // Track the terminal session + CWD at launch time for directory change detection
-  const [launchSessionId, setLaunchSessionId] = useState<string | null>(null);
-  const [launchCwd, setLaunchCwd] = useState<string | null>(null);
-  const launchGitRootRef = useRef<string | null>(null);
-  // CWD change prompt: shown when the launch terminal's CWD changes
-  const [cwdChangePrompt, setCwdChangePrompt] = useState<string | null>(null);
-  const rememberRef = useRef(false);
   const prevVisibleRef = useRef(visible);
-  const { settings, updateSettings } = useSettings();
 
+  // --- Tab state ---
+  const [tabs, setTabs] = useState<ClaudeTab[]>(() => {
+    // Restore persisted tabs (sessions will re-launch on mount)
+    const persisted = loadPersistedTabs();
+    if (persisted.length > 0) {
+      return persisted.map((p) => ({
+        ...p,
+        sessionId: null,
+        createdAt: Date.now(),
+        exited: false,
+      }));
+    }
+    // Default: single tab for current directory
+    return [];
+  });
+  const [activeTabId, setActiveTabId] = useState<string | null>(() => {
+    const persisted = loadPersistedTabs();
+    return persisted.length > 0 ? persisted[0].id : null;
+  });
+
+  // Create initial tab on first open if none exist
+  useEffect(() => {
+    if (tabs.length > 0) return;
+    if (!visible) return;
+
+    const createInitialTab = async () => {
+      const cwd = await getCwd();
+      const label = cwd?.split("/").pop() ?? "Claude";
+      const id = genTabId();
+      const tab: ClaudeTab = {
+        id,
+        sessionId: null,
+        label,
+        cwd: cwd ?? "",
+        createdAt: Date.now(),
+        exited: false,
+      };
+      setTabs([tab]);
+      setActiveTabId(id);
+      // Capture sticky project name
+      if (cwd) {
+        const homedir = await window.terminalAPI.getHomedir();
+        if (cwd !== "/" && cwd !== homedir) {
+          setStickyProjectName(cwd.split("/").pop() ?? null);
+        }
+      }
+    };
+    createInitialTab();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
+
+  // Persist tabs when they change
+  useEffect(() => {
+    if (tabs.length > 0) {
+      persistTabs(tabs);
+    } else {
+      localStorage.removeItem(STORAGE_KEY);
+    }
+  }, [tabs]);
 
   // Fetch Claude info on mount and listen for changes
   useEffect(() => {
@@ -81,170 +149,130 @@ export function ClaudePanel({
     return cleanup;
   }, []);
 
-  // Listen for CWD changes in the launch terminal session
-  useEffect(() => {
-    if (!launchSessionId || !launchCwd || !sessionId) return;
-
-    const cleanup = window.terminalAPI.onMessage((message: unknown) => {
-      const msg = message as { type: string; sessionId?: string; cwd?: string };
-      if (msg.type !== 'cwd-changed') return;
-      if (msg.sessionId !== launchSessionId) return;
-      if (!msg.cwd || msg.cwd === launchCwd) return;
-
-      // Don't prompt if the new CWD is still within the same git repo
-      const gitRoot = launchGitRootRef.current;
-      if (gitRoot && (msg.cwd === gitRoot || msg.cwd.startsWith(gitRoot + '/'))) return;
-
-      setCwdChangePrompt(msg.cwd);
-    });
-
-    return cleanup;
-  }, [launchSessionId, launchCwd, sessionId]);
-
-  // Detect when panel is reopened from a terminal with a different CWD
+  // Detect when panel is reopened from a terminal with a different CWD (single-tab only)
   useEffect(() => {
     const wasHidden = !prevVisibleRef.current;
     prevVisibleRef.current = visible;
 
-    if (!visible || !wasHidden) return; // Only on hidden → visible transition
-    if (!sessionId) return; // No active session — fresh launch will use current terminal
-    if (!focusedSessionId || focusedSessionId === launchSessionId) return; // Same terminal
+    if (!visible || !wasHidden) return;
 
-    // Focused terminal changed — check if its CWD differs from Claude's launch CWD
-    window.terminalAPI.getCwd(focusedSessionId).then((result) => {
-      if (!result.success || !result.cwd) return;
-      if (result.cwd === launchCwd) return;
-
-      // Don't prompt if the new CWD is still within the same git repo
-      const gitRoot = launchGitRootRef.current;
-      if (gitRoot && (result.cwd === gitRoot || result.cwd.startsWith(gitRoot + '/'))) return;
-
-      setCwdChangePrompt(result.cwd);
-    });
-  }, [visible, sessionId, focusedSessionId, launchSessionId, launchCwd]);
-
-  // When the IDE WebSocket disconnects (Claude CLI exited or crashed),
-  // check if the foreground process has returned to the shell — if so, close the panel.
-  useEffect(() => {
-    if (!sessionId) return;
-
-    const cleanup = window.terminalAPI.onIdeClientDisconnected(async () => {
-      try {
-        const result = await window.terminalAPI.getProcess(sessionId);
-        if (!result.success || !result.process) return;
-
-        const proc = result.process.split('/').pop() || result.process;
-        if (SHELL_NAMES.has(proc)) {
-          // Claude exited — foreground is back to shell
-          onSessionCreated(null as unknown as string);
-          onClose();
-        }
-      } catch {
-        // Session already destroyed
+    // Update sticky project name when panel becomes visible
+    getCwd().then(async (cwd) => {
+      if (!cwd) return;
+      const homedir = await window.terminalAPI.getHomedir();
+      if (cwd !== "/" && cwd !== homedir) {
+        setStickyProjectName(cwd.split("/").pop() ?? null);
       }
     });
+  }, [visible, getCwd]);
 
-    return cleanup;
-  }, [sessionId, onSessionCreated, onClose]);
-
-  // Determine if we need the permissions prompt
+  // Sync active tab's sessionId back to App.tsx for handleAddToChat
+  const activeTab = tabs.find((t) => t.id === activeTabId);
   useEffect(() => {
-    if (sessionId) return; // Already have a session
-    if (launching) return; // Already launching
+    onSessionCreated(activeTab?.sessionId ?? null);
+  }, [activeTab?.sessionId, onSessionCreated]);
 
-    const claudeSettings = settings.claude;
-    if (claudeSettings?.rememberChoice) {
-      // Auto-launch with remembered choice
-      launchClaude(claudeSettings.dangerouslySkipPermissions);
-    } else {
-      setShowPrompt(true);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Only on mount
+  // --- Tab callbacks ---
 
-  const launchClaude = useCallback(
-    async (skipPermissions: boolean, overrideCwd?: string) => {
-      setShowPrompt(false);
-      setLaunching(true);
-      setCwdChangePrompt(null);
-
-      try {
-        // Get the project CWD at launch time (from focused terminal or git root)
-        const cwd = overrideCwd ?? await getCwd();
-
-        // Capture the launch context for directory change detection
-        setLaunchSessionId(focusedSessionId);
-        setLaunchCwd(cwd ?? null);
-        // Store the git root so we can suppress prompts for subdirectory changes within the same repo
-        if (cwd) {
-          window.terminalAPI.getGitRoot(cwd).then((r) => {
-            launchGitRootRef.current = r.success && r.root ? r.root : null;
-          }).catch(() => { launchGitRootRef.current = null; });
-        } else {
-          launchGitRootRef.current = null;
-        }
-
-        // Capture the project name at launch time so it sticks
-        if (cwd) {
-          const homedir = await window.terminalAPI.getHomedir();
-          if (cwd !== '/' && cwd !== homedir) {
-            setStickyProjectName(cwd.split('/').pop() ?? null);
-          }
-        }
-
-        // Update IDE protocol lock file so Claude Code matches our workspace
-        await window.terminalAPI.ideUpdateWorkspaceFolders(cwd);
-
-        // Create a new terminal session in the project directory
-        const result = await window.terminalAPI.createSession({
-          cols: Math.floor(width / 9),
-          rows: Math.floor(window.innerHeight / 17),
-          cwd,
-        });
-
-        if (!result.success || !result.sessionId) {
-          console.error("Failed to create Claude panel session:", result.error);
-          setLaunching(false);
-          return;
-        }
-
-        onSessionCreated(result.sessionId);
-
-        // Wait a bit for the terminal to initialize, then cd + launch claude
-        setTimeout(() => {
-          const flags = skipPermissions ? " --dangerously-skip-permissions" : "";
-          // cd into the project dir first as a safety net (in case createSession
-          // cwd didn't take effect), then launch claude on the same line
-          const cdPrefix = cwd ? `cd ${shellEscape(cwd)} && ` : "";
-          window.terminalAPI.input(result.sessionId!, `${cdPrefix}claude${flags}\n`);
-          setLaunching(false);
-        }, 500);
-      } catch (err) {
-        console.error("Failed to launch Claude:", err);
-        setLaunching(false);
-      }
+  const handleTabSessionCreated = useCallback(
+    (tabId: string, newSessionId: string | null) => {
+      setTabs((prev) =>
+        prev.map((t) => (t.id === tabId ? { ...t, sessionId: newSessionId } : t))
+      );
     },
-    [width, getCwd, onSessionCreated, focusedSessionId]
+    []
   );
 
-  const handleChoice = useCallback(
-    (skipPermissions: boolean) => {
-      if (rememberRef.current) {
-        updateSettings({
-          claude: {
-            dangerouslySkipPermissions: skipPermissions,
-            rememberChoice: true,
-          },
-        });
-      }
-      launchClaude(skipPermissions);
+  const handleTabSessionExited = useCallback(
+    (tabId: string) => {
+      setTabs((prev) => {
+        const updated = prev.map((t) =>
+          t.id === tabId ? { ...t, exited: true, sessionId: null } : t
+        );
+        // If only one tab and it exited, close the panel
+        if (updated.length === 1 && updated[0].exited) {
+          // Clear persisted tabs and close
+          localStorage.removeItem(STORAGE_KEY);
+          setTimeout(() => onClose(), 0);
+          return [];
+        }
+        return updated;
+      });
     },
-    [launchClaude, updateSettings]
+    [onClose]
   );
 
-  const handleRememberChoice = useCallback((remember: boolean) => {
-    rememberRef.current = remember;
+  const handleSelectTab = useCallback((tabId: string) => {
+    setActiveTabId(tabId);
   }, []);
+
+  const handleCloseTab = useCallback(
+    (tabId: string) => {
+      setTabs((prev) => {
+        const tab = prev.find((t) => t.id === tabId);
+        // Kill the session if it's still running
+        if (tab?.sessionId) {
+          window.terminalAPI.input(tab.sessionId, "\x03");
+          setTimeout(() => {
+            if (tab.sessionId) {
+              window.terminalAPI.input(tab.sessionId, "exit\n");
+            }
+          }, 100);
+        }
+
+        const remaining = prev.filter((t) => t.id !== tabId);
+
+        if (remaining.length === 0) {
+          localStorage.removeItem(STORAGE_KEY);
+          setTimeout(() => onClose(), 0);
+          return [];
+        }
+
+        // If we closed the active tab, switch to the nearest one
+        if (tabId === activeTabId) {
+          const closedIdx = prev.findIndex((t) => t.id === tabId);
+          const newActive = remaining[Math.min(closedIdx, remaining.length - 1)];
+          setActiveTabId(newActive.id);
+        }
+
+        return remaining;
+      });
+    },
+    [activeTabId, onClose]
+  );
+
+  const handleAddTab = useCallback(
+    async (worktree?: GitWorktree) => {
+      let cwd: string;
+      let label: string;
+      let worktreeName: string | undefined;
+
+      if (worktree) {
+        cwd = worktree.path;
+        label = worktree.branch ?? worktree.path.split("/").pop() ?? "worktree";
+        worktreeName = worktree.branch ?? undefined;
+      } else {
+        const resolved = await getCwd();
+        cwd = resolved ?? "";
+        label = cwd.split("/").pop() ?? "Claude";
+      }
+
+      const id = genTabId();
+      const tab: ClaudeTab = {
+        id,
+        sessionId: null,
+        label,
+        cwd,
+        worktreeName,
+        createdAt: Date.now(),
+        exited: false,
+      };
+
+      setTabs((prev) => [...prev, tab]);
+      setActiveTabId(id);
+    },
+    [getCwd]
+  );
 
   // Resize handle
   const handleResizeMouseDown = useCallback(
@@ -254,7 +282,6 @@ export function ClaudePanel({
       const startWidth = width;
 
       const onMouseMove = (ev: MouseEvent) => {
-        // Panel grows to the left, so subtract delta
         const newWidth = startWidth - (ev.clientX - startX);
         onResize(newWidth);
       };
@@ -268,53 +295,27 @@ export function ClaudePanel({
     [width, onResize]
   );
 
-  const handleSessionClose = useCallback(() => {
-    // Session exited — close the panel. Reopening will re-launch.
-    onSessionCreated(null as unknown as string);
-    onClose();
-  }, [onSessionCreated, onClose]);
-
-  // Handle "Reopen in new directory" from the CWD change prompt
-  const handleReopenInNewDir = useCallback(() => {
-    const newCwd = cwdChangePrompt;
-    if (!newCwd || !sessionId) return;
-
-    // Kill the current Claude session by sending exit + Ctrl-C
-    window.terminalAPI.input(sessionId, '\x03');
-    setTimeout(() => {
-      window.terminalAPI.input(sessionId, 'exit\n');
-    }, 100);
-
-    // Clear state and relaunch after a short delay
-    setCwdChangePrompt(null);
-    onSessionCreated(null as unknown as string);
-
-    // Remember the permission choice from the current session
-    const skipPerms = settings.claude?.dangerouslySkipPermissions ?? false;
-    setTimeout(() => {
-      launchClaude(skipPerms, newCwd);
-    }, 600);
-  }, [cwdChangePrompt, sessionId, onSessionCreated, settings.claude, launchClaude]);
-
-  const handleDismissCwdChange = useCallback(() => {
-    setCwdChangePrompt(null);
-    // Update tracking to the currently focused terminal so the CWD change
-    // listener watches the right session and the same path doesn't re-trigger
-    if (cwdChangePrompt) setLaunchCwd(cwdChangePrompt);
-    if (focusedSessionId) setLaunchSessionId(focusedSessionId);
-  }, [cwdChangePrompt, focusedSessionId]);
-
   // Use sticky name (captured at launch), fall back to live prop (pre-launch)
   const displayName = stickyProjectName ?? projectName;
+  const showTabBar = tabs.length > 1;
 
   return (
-    <div className="claude-panel" style={{ width, display: visible ? undefined : 'none' }}>
+    <div className="claude-panel" style={{ width, display: visible ? undefined : "none" }}>
       <div className="claude-panel-resize-handle" onMouseDown={handleResizeMouseDown} />
       <div className="claude-panel-header">
         <div className="claude-panel-header-title">
           <ClaudeIcon size={14} />
-          <span>Claude Code{displayName ? <> — <strong>{displayName}</strong></> : ''}</span>
+          <span>
+            Claude Code{displayName ? <> — <strong>{displayName}</strong></> : ""}
+          </span>
         </div>
+        <ClaudeWorktreePicker
+          tabs={tabs}
+          onAddTab={handleAddTab}
+          buttonClassName="claude-panel-header-add"
+          currentCwd={activeTab?.cwd}
+        />
+        <div className="claude-panel-header-spacer" />
         <div className="claude-panel-header-right">
           {claudeInfo.model && (
             <span className="claude-panel-model-pill">{claudeInfo.model}</span>
@@ -332,44 +333,29 @@ export function ClaudePanel({
           </button>
         </div>
       </div>
-      <div className="claude-panel-content">
-        {showPrompt && !sessionId && !launching && (
-          <ClaudePermissionsPrompt
-            onChoice={handleChoice}
-            onRememberChoice={handleRememberChoice}
+      {showTabBar && (
+        <ClaudeTabBar
+          tabs={tabs}
+          activeTabId={activeTabId}
+          onSelectTab={handleSelectTab}
+          onCloseTab={handleCloseTab}
+          onAddTab={handleAddTab}
+        />
+      )}
+      <div className="claude-panel-tabs-content">
+        {tabs.map((tab) => (
+          <ClaudeTabContent
+            key={tab.id}
+            sessionId={tab.sessionId}
+            onSessionCreated={(sid) => handleTabSessionCreated(tab.id, sid)}
+            onSessionExited={() => handleTabSessionExited(tab.id)}
+            width={width}
+            isVisible={tab.id === activeTabId}
+            getCwd={getCwd}
+            overrideCwd={tab.cwd || undefined}
+            focusedSessionId={focusedSessionId}
           />
-        )}
-        {launching && !sessionId && (
-          <div className="claude-panel-loading">Starting Claude Code...</div>
-        )}
-        {sessionId && (
-          <div className="claude-panel-terminal">
-            <Terminal
-              sessionId={sessionId}
-              isVisible={true}
-              isFocused={true}
-              onClose={handleSessionClose}
-            />
-          </div>
-        )}
-        {cwdChangePrompt && sessionId && (
-          <div className="claude-panel-cwd-overlay">
-            <div className="claude-panel-cwd-modal">
-              <p className="claude-panel-cwd-modal-text">
-                Terminal changed directory to<br />
-                <strong>{dirName(cwdChangePrompt)}</strong>
-              </p>
-              <div className="claude-panel-cwd-modal-actions">
-                <button onClick={handleReopenInNewDir} type="button" className="primary">
-                  Reopen Claude here
-                </button>
-                <button onClick={handleDismissCwdChange} type="button" className="secondary">
-                  Keep current
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+        ))}
       </div>
     </div>
   );
