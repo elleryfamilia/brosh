@@ -80,6 +80,61 @@ let windowManager: WindowManager | null = null;
 let gitWatcher: import("chokidar").FSWatcher | null = null;
 let setupGitWatcher: (() => Promise<void>) | null = null;
 
+// File directory watchers (Files plugin auto-refresh)
+// Uses native fs.watch per-directory — event-driven, very low overhead.
+// Active only when: renderer requests it AND system is not suspended/locked.
+import { watch as fsWatch, type FSWatcher } from "node:fs";
+let fileWatchers = new Map<string, FSWatcher>();
+let fileWatchDebounce = new Map<string, ReturnType<typeof setTimeout>>();
+let fileWatchDesiredDirs: string[] = [];
+let fileWatchSuspended = false;
+
+function reconcileFileWatchers(wm: WindowManager) {
+  const desired = fileWatchSuspended ? [] : fileWatchDesiredDirs;
+  const desiredSet = new Set(desired);
+  const currentSet = new Set(fileWatchers.keys());
+
+  // Remove watchers no longer needed
+  for (const dir of currentSet) {
+    if (!desiredSet.has(dir)) {
+      fileWatchers.get(dir)?.close();
+      fileWatchers.delete(dir);
+      const timer = fileWatchDebounce.get(dir);
+      if (timer) { clearTimeout(timer); fileWatchDebounce.delete(dir); }
+    }
+  }
+
+  // Add watchers for new dirs
+  for (const dir of desiredSet) {
+    if (currentSet.has(dir)) continue;
+    try {
+      const watcher = fsWatch(dir, { persistent: false }, () => {
+        const existing = fileWatchDebounce.get(dir);
+        if (existing) clearTimeout(existing);
+        const timer = setTimeout(() => {
+          fileWatchDebounce.delete(dir);
+          wm.broadcast("files:dir-changed", { dirPath: dir });
+        }, 200);
+        timer.unref?.();
+        fileWatchDebounce.set(dir, timer);
+      });
+      watcher.on("error", () => {
+        fileWatchers.delete(dir);
+      });
+      fileWatchers.set(dir, watcher);
+    } catch {
+      // Directory doesn't exist or can't be watched — skip
+    }
+  }
+}
+
+function stopAllFileWatchers() {
+  for (const watcher of fileWatchers.values()) watcher.close();
+  fileWatchers.clear();
+  for (const timer of fileWatchDebounce.values()) clearTimeout(timer);
+  fileWatchDebounce.clear();
+}
+
 
 /**
  * Register all IPC handlers for terminal operations.
@@ -422,6 +477,23 @@ function registerIpcHandlers(wm: WindowManager): void {
       await gitWatcher.close();
       gitWatcher = null;
     }
+    stopAllFileWatchers();
+  });
+
+  // ==========================================
+  // File directory watcher IPC (Files plugin auto-refresh)
+  // Renderer sends the list of visible directories; main manages
+  // native fs.watch handles and pauses on suspend/lock.
+  // ==========================================
+
+  ipcMain.handle("file:watch-dirs", (_event, dirs: string[]) => {
+    fileWatchDesiredDirs = dirs;
+    reconcileFileWatchers(wm);
+  });
+
+  ipcMain.handle("file:watch-stop", () => {
+    fileWatchDesiredDirs = [];
+    reconcileFileWatchers(wm);
   });
 
   // ==========================================
@@ -823,6 +895,90 @@ function registerIpcHandlers(wm: WindowManager): void {
     }
   });
 
+  ipcMain.handle("git:listWorktrees", async (_event: Electron.IpcMainInvokeEvent, cwd?: string) => {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    try {
+      const { stdout } = await execFileAsync("git", ["worktree", "list", "--porcelain"], {
+        encoding: "utf8",
+        cwd: cwd || undefined,
+      });
+
+      interface Worktree {
+        path: string;
+        branch: string | null;
+        head: string;
+        isBare: boolean;
+      }
+
+      const worktrees: Worktree[] = [];
+      let current: Partial<Worktree> = {};
+
+      for (const line of stdout.split("\n")) {
+        if (line.startsWith("worktree ")) {
+          if (current.path) worktrees.push(current as Worktree);
+          current = { path: line.slice(9), branch: null, head: "", isBare: false };
+        } else if (line.startsWith("HEAD ")) {
+          current.head = line.slice(5);
+        } else if (line.startsWith("branch ")) {
+          // branch refs/heads/main → main
+          const ref = line.slice(7);
+          current.branch = ref.replace(/^refs\/heads\//, "");
+        } else if (line === "bare") {
+          current.isBare = true;
+        } else if (line === "" && current.path) {
+          worktrees.push(current as Worktree);
+          current = {};
+        }
+      }
+      if (current.path) worktrees.push(current as Worktree);
+
+      return { success: true, worktrees };
+    } catch {
+      return { success: false, worktrees: [] };
+    }
+  });
+
+  ipcMain.handle("git:getCommonDir", async (_event: Electron.IpcMainInvokeEvent, cwd?: string) => {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const path = await import("path");
+    const execFileAsync = promisify(execFile);
+
+    try {
+      const { stdout } = await execFileAsync("git", ["rev-parse", "--git-common-dir"], {
+        encoding: "utf8",
+        cwd: cwd || undefined,
+        timeout: 2000,
+      });
+      const resolved = path.resolve(cwd || ".", stdout.trim());
+      return { success: true, commonDir: resolved };
+    } catch {
+      return { success: false, commonDir: null };
+    }
+  });
+
+  ipcMain.handle("git:removeWorktree", async (_event: Electron.IpcMainInvokeEvent, worktreePath: string) => {
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    try {
+      await execFileAsync("git", ["worktree", "remove", worktreePath], {
+        encoding: "utf8",
+        timeout: 10000,
+      });
+      return { success: true };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      // Surface the error to the renderer so it can prompt the user
+      // instead of silently force-removing uncommitted work.
+      return { success: false, error: msg };
+    }
+  });
+
   ipcMain.handle("git:checkIgnore", async (_event: Electron.IpcMainInvokeEvent, paths: string[]) => {
     if (paths.length === 0) return { success: true, ignored: [] };
 
@@ -843,6 +999,335 @@ function registerIpcHandlers(wm: WindowManager): void {
     } catch {
       // Exit code 1 means none are ignored; 128 means not a git repo — both fine
       return { success: true, ignored: [] };
+    }
+  });
+
+  // Claude agent sessions discovery.
+  // Two-pronged approach:
+  //  A) Read ~/.claude/sessions/*.json for launcher PIDs (covers all projects)
+  //  B) For a given project, scan JSONL files modified in the last hour for
+  //     subagents + tasks (catches sessions whose JSONL ID differs from sessions/ entry)
+  ipcMain.handle("claude:getActiveSessions", async (_event: Electron.IpcMainInvokeEvent, projectCwd?: string) => {
+    const os = await import("os");
+    const fs = await import("fs");
+    const path = await import("path");
+    const { execFile } = await import("child_process");
+    const { promisify } = await import("util");
+    const execFileAsync = promisify(execFile);
+
+    const claudeDir = path.join(os.homedir(), ".claude");
+    const sessionsDir = path.join(claudeDir, "sessions");
+    const projectsDir = path.join(claudeDir, "projects");
+
+    interface SubagentInfo {
+      id: string;
+      agentType: string;
+    }
+
+    interface TaskInfo {
+      id: number;
+      subject: string;
+      status: string;
+    }
+
+    interface ActiveSession {
+      pid: number;
+      sessionId: string;
+      cwd: string;
+      startedAt: number;
+      alive: boolean;
+      projectName: string;
+      gitBranch: string | null;
+      gitCommonDir: string | null;
+      summary: string | null;
+      messageCount: number;
+      lastActivity: number | null;
+      subagents: SubagentInfo[];
+      tasks: TaskInfo[];
+    }
+
+    // Helper: read subagents from a session dir
+    async function readSubagents(projectDir: string, sessionId: string): Promise<SubagentInfo[]> {
+      const subagents: SubagentInfo[] = [];
+      try {
+        const dir = path.join(projectDir, sessionId, "subagents");
+        const files = (await fs.promises.readdir(dir)).filter((f: string) => f.endsWith(".meta.json"));
+        for (const f of files) {
+          try {
+            const raw = await fs.promises.readFile(path.join(dir, f), "utf8");
+            const meta = JSON.parse(raw);
+            subagents.push({
+              id: f.replace(".meta.json", "").replace("agent-", ""),
+              agentType: meta.agentType || "unknown",
+            });
+          } catch { /* skip */ }
+        }
+      } catch { /* no subagents dir */ }
+      return subagents;
+    }
+
+    // Helper: extract tasks from JSONL tail
+    async function readTasks(jsonlPath: string): Promise<TaskInfo[]> {
+      const tasks: TaskInfo[] = [];
+      try {
+        const stat = await fs.promises.stat(jsonlPath);
+        const readSize = Math.min(stat.size, 100_000);
+        const fd = await fs.promises.open(jsonlPath, "r");
+        const buf = Buffer.alloc(readSize);
+        await fd.read(buf, 0, readSize, Math.max(0, stat.size - readSize));
+        await fd.close();
+        const tail = buf.toString("utf8");
+
+        const taskMap = new Map<number, TaskInfo>();
+        for (const line of tail.split("\n")) {
+          if (!line.includes("TaskCreate") && !line.includes("TaskUpdate")) continue;
+          try {
+            const entry = JSON.parse(line);
+            const contents = entry?.message?.content;
+            if (!Array.isArray(contents)) continue;
+            for (const block of contents) {
+              if (block.type !== "tool_use") continue;
+              if (block.name === "TaskCreate" && block.input) {
+                const id = taskMap.size + 1;
+                taskMap.set(id, {
+                  id,
+                  subject: block.input.subject || block.input.description || "Task",
+                  status: "pending",
+                });
+              } else if (block.name === "TaskUpdate" && block.input) {
+                const tid = block.input.id ?? block.input.task_id;
+                if (tid != null && taskMap.has(tid)) {
+                  const existing = taskMap.get(tid)!;
+                  if (block.input.status) existing.status = block.input.status;
+                  if (block.input.subject) existing.subject = block.input.subject;
+                }
+              }
+            }
+          } catch { /* skip bad JSON lines */ }
+        }
+        for (const [, task] of taskMap) {
+          if (task.status !== "completed") tasks.push(task);
+        }
+      } catch { /* no JSONL */ }
+      return tasks;
+    }
+
+    try {
+      const sessions: ActiveSession[] = [];
+      const seenSessionIds = new Set<string>();
+
+      // --- Prong A: Read sessions/*.json for launcher PIDs ---
+      try {
+        const sessionFiles = (await fs.promises.readdir(sessionsDir)).filter((f: string) => f.endsWith(".json"));
+        for (const file of sessionFiles) {
+          try {
+            const raw = await fs.promises.readFile(path.join(sessionsDir, file), "utf8");
+            const data = JSON.parse(raw);
+            if (!data.pid || !data.sessionId) continue;
+
+            let alive = false;
+            try { process.kill(data.pid, 0); alive = true; } catch { /* dead */ }
+
+            const cwd = data.cwd || "";
+            const projectName = cwd.split("/").pop() || cwd;
+            const projectKey = cwd.replace(/[/_]/g, "-");
+            const projectDir = path.join(projectsDir, projectKey);
+
+            let gitBranch: string | null = null;
+            let gitCommonDir: string | null = null;
+
+            try {
+              const { stdout } = await execFileAsync("git", ["rev-parse", "--git-common-dir"], {
+                encoding: "utf8", cwd, timeout: 2000,
+              });
+              gitCommonDir = path.resolve(cwd, stdout.trim());
+            } catch { /* not git */ }
+
+            try {
+              const { stdout } = await execFileAsync("git", ["branch", "--show-current"], {
+                encoding: "utf8", cwd, timeout: 2000,
+              });
+              gitBranch = stdout.trim() || null;
+            } catch { /* not git */ }
+
+            const subagents = await readSubagents(projectDir, data.sessionId);
+            const jsonlPath = path.join(projectDir, `${data.sessionId}.jsonl`);
+            let lastActivity: number | null = data.startedAt || null;
+            try {
+              const stat = await fs.promises.stat(jsonlPath);
+              lastActivity = stat.mtimeMs;
+            } catch { /* no JSONL */ }
+
+            const tasks = alive ? await readTasks(jsonlPath) : [];
+
+            seenSessionIds.add(data.sessionId);
+            sessions.push({
+              pid: data.pid,
+              sessionId: data.sessionId,
+              cwd,
+              startedAt: data.startedAt || 0,
+              alive,
+              projectName,
+              gitBranch,
+              gitCommonDir,
+              summary: null,
+              messageCount: 0,
+              lastActivity,
+              subagents,
+              tasks,
+            });
+          } catch { /* skip corrupt */ }
+        }
+      } catch { /* no sessions dir */ }
+
+      // --- Prong B: Scan project dir for recently active JSONL sessions ---
+      // This catches sessions launched from brosh where the JSONL session ID
+      // differs from the sessions/ entry (e.g., Claude Code spawns a worker
+      // with its own session ID).
+      if (projectCwd) {
+        const projectKey = projectCwd.replace(/[/_]/g, "-");
+        const projectDir = path.join(projectsDir, projectKey);
+        const ONE_HOUR = 60 * 60 * 1000;
+        const now = Date.now();
+
+        try {
+          const entries = await fs.promises.readdir(projectDir, { withFileTypes: true });
+          for (const entry of entries) {
+            if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+            const sessionId = entry.name.replace(".jsonl", "");
+            if (seenSessionIds.has(sessionId)) continue;
+
+            const jsonlPath = path.join(projectDir, entry.name);
+            const stat = await fs.promises.stat(jsonlPath);
+            if (now - stat.mtimeMs > ONE_HOUR) continue; // Skip stale
+
+            const subagents = await readSubagents(projectDir, sessionId);
+            const tasks = await readTasks(jsonlPath);
+
+            // Only include if it has subagents or tasks (otherwise it's just a session entry)
+            if (subagents.length === 0 && tasks.length === 0) continue;
+
+            let gitBranch: string | null = null;
+            let gitCommonDir: string | null = null;
+            try {
+              const { stdout } = await execFileAsync("git", ["rev-parse", "--git-common-dir"], {
+                encoding: "utf8", cwd: projectCwd, timeout: 2000,
+              });
+              gitCommonDir = path.resolve(projectCwd, stdout.trim());
+            } catch { /* not git */ }
+            try {
+              const { stdout } = await execFileAsync("git", ["branch", "--show-current"], {
+                encoding: "utf8", cwd: projectCwd, timeout: 2000,
+              });
+              gitBranch = stdout.trim() || null;
+            } catch { /* not git */ }
+
+            seenSessionIds.add(sessionId);
+            sessions.push({
+              pid: 0,
+              sessionId,
+              cwd: projectCwd,
+              startedAt: 0,
+              alive: false, // No PID available — can't verify liveness
+              projectName: projectCwd.split("/").pop() || projectCwd,
+              gitBranch,
+              gitCommonDir,
+              summary: null,
+              messageCount: 0,
+              lastActivity: stat.mtimeMs,
+              subagents,
+              tasks,
+            });
+          }
+        } catch { /* no project dir */ }
+      }
+
+      // Deduplicate: when multiple sessions share a CWD, keep the one with
+      // more subagents/tasks (Prong B finds richer data than Prong A)
+      const byCwd = new Map<string, ActiveSession>();
+      for (const s of sessions) {
+        const existing = byCwd.get(s.cwd);
+        if (!existing) {
+          byCwd.set(s.cwd, s);
+        } else {
+          const existingRichness = existing.subagents.length + existing.tasks.length;
+          const newRichness = s.subagents.length + s.tasks.length;
+          if (newRichness > existingRichness) {
+            // Keep the richer one but preserve alive/pid from the launcher if available
+            if (existing.pid > 0 && existing.alive) {
+              s.pid = existing.pid;
+              s.alive = true;
+            }
+            byCwd.set(s.cwd, s);
+          }
+        }
+      }
+      const deduped = Array.from(byCwd.values());
+
+      deduped.sort((a, b) => {
+        if (a.alive !== b.alive) return a.alive ? -1 : 1;
+        return (b.lastActivity || 0) - (a.lastActivity || 0);
+      });
+
+      return { success: true, sessions: deduped };
+    } catch {
+      return { success: false, sessions: [] };
+    }
+  });
+
+  // Read/write ~/.claude/settings.json for agent teams toggle
+  ipcMain.handle("claude:setAgentTeams", async (_event: Electron.IpcMainInvokeEvent, enabled: boolean) => {
+    const os = await import("os");
+    const fs = await import("fs");
+    const path = await import("path");
+
+    const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+
+    try {
+      let data: Record<string, unknown> = {};
+      try {
+        const raw = await fs.promises.readFile(settingsPath, "utf8");
+        data = JSON.parse(raw);
+      } catch {
+        // File doesn't exist or is invalid — start fresh
+      }
+
+      if (enabled) {
+        const env = (data.env as Record<string, string>) || {};
+        env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] = "1";
+        data.env = env;
+      } else {
+        const env = (data.env as Record<string, string>) || {};
+        delete env["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"];
+        // Remove the env key entirely if empty
+        if (Object.keys(env).length === 0) {
+          delete data.env;
+        } else {
+          data.env = env;
+        }
+      }
+
+      await fs.promises.writeFile(settingsPath, JSON.stringify(data, null, 2) + "\n", "utf8");
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle("claude:getAgentTeams", async () => {
+    const os = await import("os");
+    const fs = await import("fs");
+    const path = await import("path");
+
+    const settingsPath = path.join(os.homedir(), ".claude", "settings.json");
+
+    try {
+      const raw = await fs.promises.readFile(settingsPath, "utf8");
+      const data = JSON.parse(raw);
+      const env = data.env as Record<string, string> | undefined;
+      return { success: true, enabled: env?.["CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS"] === "1" };
+    } catch {
+      return { success: true, enabled: false };
     }
   });
 
@@ -1863,6 +2348,9 @@ app.whenReady().then(async () => {
       await gitWatcher.close();
       gitWatcher = null;
     }
+    // Pause file watchers
+    fileWatchSuspended = true;
+    stopAllFileWatchers();
     // Pause update checks during sleep
     stopPeriodicCheck();
     // Notify all windows to pause activities
@@ -1874,6 +2362,11 @@ app.whenReady().then(async () => {
     // Restart git watcher
     if (setupGitWatcher) {
       await setupGitWatcher();
+    }
+    // Resume file watchers (if renderer still wants them)
+    fileWatchSuspended = false;
+    if (windowManager && fileWatchDesiredDirs.length > 0) {
+      reconcileFileWatchers(windowManager);
     }
     // Resume update checks
     if (app.isPackaged) {
@@ -1894,6 +2387,8 @@ app.whenReady().then(async () => {
       await gitWatcher.close();
       gitWatcher = null;
     }
+    fileWatchSuspended = true;
+    stopAllFileWatchers();
     stopPeriodicCheck();
     windowManager?.handleSystemSuspend();
   });
@@ -1902,6 +2397,10 @@ app.whenReady().then(async () => {
     console.log('[main] Screen unlocked - restarting background activities');
     if (setupGitWatcher) {
       await setupGitWatcher();
+    }
+    fileWatchSuspended = false;
+    if (windowManager && fileWatchDesiredDirs.length > 0) {
+      reconcileFileWatchers(windowManager);
     }
     if (app.isPackaged) {
       startPeriodicCheck();

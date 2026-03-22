@@ -42,6 +42,10 @@ export interface SandboxConfig {
 }
 
 export interface TerminalAPI {
+  // Clipboard (uses Electron's clipboard module — no focus/permission requirement)
+  clipboardWriteText: (text: string) => void;
+  clipboardReadText: () => string;
+
   // Session management
   createSession: (options?: {
     cols?: number;
@@ -184,6 +188,11 @@ export interface TerminalAPI {
   gitListMarkdownFiles: (cwd?: string) => Promise<{ success: boolean; files: string[]; root: string | null }>;
   discoverMemoryFiles: (cwd?: string) => Promise<{ success: boolean; files: MemoryFileInfo[] }>;
 
+  // File directory watching (Files plugin auto-refresh)
+  fileWatchDirs: (dirs: string[]) => Promise<void>;
+  fileWatchStop: () => Promise<void>;
+  onFilesDirChanged: (callback: (data: { dirPath: string }) => void) => () => void;
+
   // Git status
   getGitStatus: (cwd?: string) => Promise<GitStatusResult | null>;
   onGitChanged: (callback: () => void) => () => void;
@@ -191,6 +200,17 @@ export interface TerminalAPI {
   // Git root
   getGitRoot: (cwd?: string) => Promise<{ success: boolean; root: string | null }>;
   gitCheckIgnore: (paths: string[]) => Promise<{ success: boolean; ignored: string[] }>;
+  gitGetCommonDir: (cwd?: string) => Promise<{ success: boolean; commonDir: string | null }>;
+  gitRemoveWorktree: (worktreePath: string) => Promise<{ success: boolean; error?: string }>;
+  gitListWorktrees: (cwd?: string) => Promise<{
+    success: boolean;
+    worktrees: Array<{
+      path: string;
+      branch: string | null;
+      head: string;
+      isBare: boolean;
+    }>;
+  }>;
 
   // Git commits
   getGitCommits: (cwd?: string, count?: number) => Promise<GitCommitResult[] | null>;
@@ -221,6 +241,15 @@ export interface TerminalAPI {
   onClaudeInfoChanged: (callback: (data: { model: string | null; version: string | null }) => void) => () => void;
   onIdeClientDisconnected: (callback: (data: { code: number }) => void) => () => void;
 
+  // Claude agent sessions discovery
+  claudeGetActiveSessions: (projectCwd?: string) => Promise<{
+    success: boolean;
+    sessions: ClaudeActiveSession[];
+  }>;
+  claudeSetAgentTeams: (enabled: boolean) => Promise<{ success: boolean; error?: string }>;
+  claudeGetAgentTeams: () => Promise<{ success: boolean; enabled: boolean }>;
+
+
   // Analytics
   analyticsGetConsent: () => Promise<boolean>;
   analyticsSetConsent: (enabled: boolean) => Promise<{ success: boolean }>;
@@ -235,6 +264,34 @@ export interface TerminalAPI {
   dismissPlan: (gitRoot: string, filename: string) => Promise<PlanFileInfo[]>;
   resetPlanIndex: (gitRoot: string) => Promise<PlanFileInfo[]>;
   pollPlansDirectory: () => Promise<{ newFiles: string[]; changedFiles: string[]; deletedFiles: string[] }>;
+}
+
+export interface ClaudeSubagentInfo {
+  id: string;
+  agentType: string;
+}
+
+export interface ClaudeTaskInfo {
+  id: number;
+  subject: string;
+  status: string; // "pending" | "in_progress" | "completed"
+}
+
+export interface ClaudeActiveSession {
+  pid: number;
+  sessionId: string;
+  cwd: string;
+  startedAt: number;
+  alive: boolean;
+  projectName: string;
+  gitBranch: string | null;
+  /** Shared git dir — same across worktrees of the same repo */
+  gitCommonDir: string | null;
+  summary: string | null;
+  messageCount: number;
+  lastActivity: number | null;
+  subagents: ClaudeSubagentInfo[];
+  tasks: ClaudeTaskInfo[];
 }
 
 export interface PlanFileInfo {

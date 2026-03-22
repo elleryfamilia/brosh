@@ -159,13 +159,28 @@ export function useFilesData({
       const entries = await fetchDirEntries(dirPath);
       setRootEntries(entries);
     }
+    // Re-fetch this directory and all expanded descendants so the
+    // entire visible subtree is up-to-date after a refresh.
     setExpandedDirs((prev) => {
-      if (!prev.has(dirPath)) return prev;
-      // Re-fetch this directory
-      fetchDirEntries(dirPath).then((entries) => {
+      const toRefresh = Array.from(prev.keys()).filter(
+        (key) => key === dirPath || key.startsWith(dirPath + '/')
+      );
+      if (toRefresh.length === 0) return prev;
+
+      Promise.all(
+        toRefresh.map(async (dir) => {
+          const entries = await fetchDirEntries(dir);
+          return [dir, entries] as const;
+        })
+      ).then((results) => {
         setExpandedDirs((p) => {
           const next = new Map(p);
-          next.set(dirPath, entries);
+          for (const [dir, entries] of results) {
+            // Only update dirs still expanded (user may have collapsed while fetching)
+            if (next.has(dir)) {
+              next.set(dir, entries);
+            }
+          }
           return next;
         });
       });
@@ -224,6 +239,83 @@ export function useFilesData({
     }
     return result.success;
   }, [refreshDir]);
+
+  // --- File watcher lifecycle ---
+  // Active only when: plugin is open AND window is focused AND document is visible.
+  // The main process additionally pauses on system suspend/lock.
+  const watchActiveRef = useRef(false);
+
+  // Compute the list of directories the main process should watch
+  const getWatchDirs = useCallback((): string[] => {
+    if (!root) return [];
+    return [root, ...expandedDirs.keys()];
+  }, [root, expandedDirs]);
+
+  // Start or stop watching based on conditions
+  const syncWatcher = useCallback(() => {
+    const shouldWatch = isActive && document.hasFocus() && !document.hidden && !!root;
+    if (shouldWatch && !watchActiveRef.current) {
+      watchActiveRef.current = true;
+      window.terminalAPI.fileWatchDirs(getWatchDirs());
+    } else if (shouldWatch && watchActiveRef.current) {
+      // Conditions still met — update the dir list (expand/collapse changed it)
+      window.terminalAPI.fileWatchDirs(getWatchDirs());
+    } else if (!shouldWatch && watchActiveRef.current) {
+      watchActiveRef.current = false;
+      window.terminalAPI.fileWatchStop();
+    }
+  }, [isActive, root, getWatchDirs]);
+
+  // React to plugin active state and expanded dir changes
+  useEffect(() => {
+    syncWatcher();
+  }, [syncWatcher]);
+
+  // React to window focus and document visibility changes
+  useEffect(() => {
+    const handleFocusChange = () => syncWatcher();
+    const handleVisibilityChange = () => syncWatcher();
+
+    window.addEventListener("focus", handleFocusChange);
+    window.addEventListener("blur", handleFocusChange);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener("focus", handleFocusChange);
+      window.removeEventListener("blur", handleFocusChange);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [syncWatcher]);
+
+  // Stop watchers on unmount
+  useEffect(() => {
+    return () => {
+      window.terminalAPI.fileWatchStop();
+    };
+  }, []);
+
+  // Listen for directory change events from the main process
+  useEffect(() => {
+    const cleanup = window.terminalAPI.onFilesDirChanged(({ dirPath }) => {
+      if (!root) return;
+      if (dirPath === root) {
+        fetchDirEntries(root).then((entries) => setRootEntries(entries)).catch(() => {});
+      }
+      setExpandedDirs((prev) => {
+        if (!prev.has(dirPath)) return prev;
+        fetchDirEntries(dirPath).then((entries) => {
+          setExpandedDirs((p) => {
+            if (!p.has(dirPath)) return p;
+            const next = new Map(p);
+            next.set(dirPath, entries);
+            return next;
+          });
+        });
+        return prev;
+      });
+    });
+    return cleanup;
+  }, [root]);
 
   return {
     expandedDirs,

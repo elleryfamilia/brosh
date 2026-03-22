@@ -81,6 +81,10 @@ interface TerminalProps {
   onMethodsReady?: (methods: TerminalMethods) => void;
   onFileLink?: (filePath: string, isDiff: boolean) => void;
   onAddToChat?: (sessionId: string, text: string) => void;
+  /** Enable Claude-pane scroll handling: uses DOM-based scroll detection
+   *  and a buffer-transition cooldown to prevent ink's rapid alternate
+   *  buffer cycling from corrupting the scroll position. */
+  claudeMode?: boolean;
 }
 
 /**
@@ -114,7 +118,7 @@ function buildXtermTheme(theme: Theme) {
   };
 }
 
-export function Terminal({ sessionId, onClose, isVisible = true, isFocused = true, onFocus, onContextMenu, onInputModeChange, onTypoSuggestionChange, onAutocompleteChange, onMethodsReady, onFileLink, onAddToChat }: TerminalProps) {
+export function Terminal({ sessionId, onClose, isVisible = true, isFocused = true, onFocus, onContextMenu, onInputModeChange, onTypoSuggestionChange, onAutocompleteChange, onMethodsReady, onFileLink, onAddToChat, claudeMode = false }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -179,6 +183,12 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
     wasAtBottom: boolean;
   } | null>(null);
 
+  // Claude-mode buffer cooldown: after exiting alternate buffer, suppress scroll
+  // manipulation for a short window. If ink re-enters alternate within the
+  // cooldown (which it does during re-renders), no scroll damage occurs.
+  const bufferCooldownRef = useRef(false);
+  const bufferCooldownTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Ref for file link callback (to avoid re-creating terminal when callback changes)
   const onFileLinkRef = useRef(onFileLink);
   onFileLinkRef.current = onFileLink;
@@ -195,13 +205,42 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
   const handleOutput = useCallback((data: string) => {
     if (!xtermRef.current) return;
 
+    if (claudeMode) {
+      // Claude mode: avoid using userScrolledBackRef which gets corrupted
+      // during ink's rapid alternate buffer cycling. Instead, check the
+      // actual DOM scroll position at write time.
+      //
+      // During buffer transitions (cooldown active) or while in the alternate
+      // buffer, just write normally — ink manages its own viewport.
+      if (isInAlternateBufferRef.current || bufferCooldownRef.current) {
+        xtermRef.current.write(data);
+        return;
+      }
+
+      // Normal buffer, no transition — check actual DOM position
+      const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
+      if (viewport) {
+        const scrollTop = viewport.scrollTop;
+        const maxScroll = viewport.scrollHeight - viewport.clientHeight;
+        const isAtBottom = maxScroll <= 1 || scrollTop >= maxScroll - 1;
+
+        if (!isAtBottom) {
+          xtermRef.current.write(data, () => {
+            viewport.scrollTop = scrollTop;
+          });
+          return;
+        }
+      }
+      xtermRef.current.write(data);
+      return;
+    }
+
+    // Normal mode: use userScrolledBackRef flag
     if (userScrolledBackRef.current && !isInAlternateBufferRef.current) {
       const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
       const scrollTop = viewport?.scrollTop ?? null;
 
       xtermRef.current.write(data, () => {
-        // Callback fires after xterm finishes processing the write.
-        // Restore the DOM scroll position the user was looking at.
         if (viewport && scrollTop != null) {
           viewport.scrollTop = scrollTop;
         }
@@ -209,7 +248,7 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
     } else {
       xtermRef.current.write(data);
     }
-  }, []);
+  }, [claudeMode]);
 
   // Handle session close
   const handleSessionClose = useCallback(() => {
@@ -469,7 +508,7 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       // Cmd/Ctrl+C - smart copy/SIGINT
       if (isMod && event.key === "c" && !event.shiftKey) {
         if (xterm.hasSelection()) {
-          navigator.clipboard.writeText(xterm.getSelection());
+          window.terminalAPI.clipboardWriteText(xterm.getSelection());
           return false; // Prevent xterm handling, we copied
         }
         return true; // Let through for SIGINT (no selection)
@@ -479,7 +518,7 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       if (isMod && event.shiftKey && event.key.toLowerCase() === "c") {
         const selection = xterm.getSelection();
         if (selection) {
-          navigator.clipboard.writeText(selection);
+          window.terminalAPI.clipboardWriteText(selection);
         }
         return false;
       }
@@ -487,22 +526,20 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       // Cmd/Ctrl+V - paste
       if (isMod && event.key === "v" && !event.shiftKey) {
         event.preventDefault(); // Prevent browser's default paste
-        navigator.clipboard.readText().then((text) => {
-          if (text) {
-            window.terminalAPI.input(sessionId, text).catch(console.error);
-          }
-        });
+        const text = window.terminalAPI.clipboardReadText();
+        if (text) {
+          window.terminalAPI.input(sessionId, text).catch(console.error);
+        }
         return false;
       }
 
       // Cmd/Ctrl+Shift+V - paste (alternative shortcut, same behavior)
       if (isMod && event.shiftKey && event.key.toLowerCase() === "v") {
         event.preventDefault(); // Prevent browser's default paste
-        navigator.clipboard.readText().then((text) => {
-          if (text) {
-            window.terminalAPI.input(sessionId, text).catch(console.error);
-          }
-        });
+        const text = window.terminalAPI.clipboardReadText();
+        if (text) {
+          window.terminalAPI.input(sessionId, text).catch(console.error);
+        }
         return false;
       }
 
@@ -783,6 +820,37 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
     //   2. Skipping the rAF restore if we've already re-entered the alternate buffer
     //      (the exit was transient, not real).
     const bufferChangeDisposable = xterm.buffer.onBufferChange((buffer) => {
+      if (claudeMode) {
+        // Claude mode: just track the buffer state and use a cooldown to
+        // suppress scroll manipulation during ink's rapid buffer cycling.
+        // All scroll preservation is handled by handleOutput's DOM-based
+        // detection, so we don't need save/restore logic here.
+        if (buffer.type === 'alternate') {
+          isInAlternateBufferRef.current = true;
+          // Entering alternate — cancel any pending cooldown
+          if (bufferCooldownTimeoutRef.current) {
+            clearTimeout(bufferCooldownTimeoutRef.current);
+            bufferCooldownTimeoutRef.current = null;
+          }
+          bufferCooldownRef.current = false;
+        } else {
+          isInAlternateBufferRef.current = false;
+          // Start cooldown — suppress scroll handling until we know this
+          // isn't a transient exit (ink re-render). If ink re-enters
+          // alternate within 100ms, the cooldown is cancelled above.
+          bufferCooldownRef.current = true;
+          if (bufferCooldownTimeoutRef.current) {
+            clearTimeout(bufferCooldownTimeoutRef.current);
+          }
+          bufferCooldownTimeoutRef.current = setTimeout(() => {
+            bufferCooldownRef.current = false;
+            bufferCooldownTimeoutRef.current = null;
+          }, 100);
+        }
+        return;
+      }
+
+      // Normal mode: save/restore scroll positions across buffer transitions
       if (buffer.type === 'alternate') {
         // Entering alternate buffer — save only if we don't already have a
         // snapshot (preserves the correct position through rapid cycles).
@@ -853,6 +921,9 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       }
       if (scrollTimeoutRef.current) {
         clearTimeout(scrollTimeoutRef.current);
+      }
+      if (bufferCooldownTimeoutRef.current) {
+        clearTimeout(bufferCooldownTimeoutRef.current);
       }
       container?.removeEventListener("mousedown", handleMouseDown);
       bufferChangeDisposable.dispose();
@@ -1150,7 +1221,10 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
     // and xterm viewport scroll events.  Also update the scroll-lock flag.
     const handleScroll = () => {
       showScrollbar();
-      if (xtermRef.current && !isInAlternateBufferRef.current) {
+      // Skip userScrolledBackRef updates during buffer cooldown — the
+      // transient normal-buffer viewport position (often 0) is stale
+      // and would incorrectly mark the user as "scrolled back".
+      if (xtermRef.current && !isInAlternateBufferRef.current && !bufferCooldownRef.current) {
         const buf = xtermRef.current.buffer.active;
         userScrolledBackRef.current = buf.viewportY < buf.baseY;
       }
@@ -1299,19 +1373,15 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       if (xtermRef.current) {
         const selection = xtermRef.current.getSelection();
         if (selection) {
-          navigator.clipboard.writeText(selection);
+          window.terminalAPI.clipboardWriteText(selection);
         }
       }
     },
     paste: async () => {
       if (xtermRef.current) {
-        try {
-          const text = await navigator.clipboard.readText();
-          if (text) {
-            window.terminalAPI.input(sessionId, text).catch(console.error);
-          }
-        } catch (err) {
-          console.error("Failed to paste:", err);
+        const text = window.terminalAPI.clipboardReadText();
+        if (text) {
+          window.terminalAPI.input(sessionId, text).catch(console.error);
         }
       }
     },

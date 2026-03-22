@@ -32,22 +32,23 @@ export function ClaudePermissionsPrompt({
       <ClaudeIcon size={32} className="claude-permissions-icon" />
       <h3 className="claude-permissions-heading">Launch Claude Code</h3>
       <p className="claude-permissions-desc">
-        Skip permission prompts? This runs Claude Code with{" "}
-        <code>--dangerously-skip-permissions</code>, allowing it to execute
-        tools without asking.
+        Auto-approve tool use? This runs Claude Code in{" "}
+        <code>dontAsk</code> mode with common tools pre-approved
+        (Bash, Read, Edit, Write, WebFetch, WebSearch).
+        Unlisted tools are silently denied.
       </p>
       <div className="claude-permissions-actions">
         <button
           className="claude-permissions-btn claude-permissions-btn-primary"
           onClick={() => onChoice(true)}
         >
-          Yes, skip permissions
+          Yes, auto-approve
         </button>
         <button
           className="claude-permissions-btn"
           onClick={() => onChoice(false)}
         >
-          No, keep permissions
+          No, ask each time
         </button>
       </div>
       <label className="claude-permissions-remember">

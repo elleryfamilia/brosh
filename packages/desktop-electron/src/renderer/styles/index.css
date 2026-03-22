@@ -4785,6 +4785,7 @@ body,
   background: var(--surface-0);
   border-left: 1px solid var(--border);
   z-index: 10;
+  overflow: visible;
   animation: claude-panel-slide-in 0.15s ease;
 }
 
@@ -4828,12 +4829,15 @@ body,
   color: var(--fg-primary);
   opacity: 0.8;
   min-width: 0;
-  overflow: hidden;
 }
 
 .claude-panel-header-title svg {
   color: var(--accent);
   flex-shrink: 0;
+}
+
+.claude-panel-header-spacer {
+  flex: 1;
 }
 
 .claude-panel-header-right {
@@ -4862,6 +4866,27 @@ body,
   font-size: 10px;
   color: var(--text-secondary, #888);
   opacity: 0.5;
+}
+
+.claude-panel-header-add {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--fg-primary);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 500;
+  padding: 1px 7px;
+  line-height: 1.2;
+  border-radius: 4px;
+  position: relative;
+  z-index: 2;
+  -webkit-app-region: no-drag;
+}
+
+.claude-panel-header-add:hover {
+  background: var(--accent);
+  color: var(--surface-0);
+  border-color: var(--accent);
 }
 
 .claude-panel-close {
@@ -5133,6 +5158,226 @@ body,
 
 .claude-permissions-remember input {
   cursor: pointer;
+}
+
+/* Claude Panel Tabs Content (holds all tab contents stacked) */
+.claude-panel-tabs-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+/* ==================== Claude Panel Tab Bar ==================== */
+
+.claude-panel-tab-bar {
+  display: flex;
+  align-items: stretch;
+  height: 28px;
+  background: var(--surface-0);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-app-region: no-drag;
+}
+
+.claude-panel-tab-bar::-webkit-scrollbar {
+  height: 0;
+}
+
+.claude-panel-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  min-width: 0;
+  max-width: 200px;
+  font-size: 12px;
+  color: var(--text-secondary, #888);
+  border-right: 1px solid var(--border);
+  cursor: pointer;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.claude-panel-tab:hover {
+  background: var(--surface-1);
+  color: var(--fg-primary);
+}
+
+.claude-panel-tab.active {
+  background: var(--surface-1);
+  color: var(--fg-primary);
+  border-bottom: 2px solid var(--accent);
+}
+
+.claude-panel-tab.exited {
+  opacity: 0.5;
+}
+
+.claude-panel-tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.claude-panel-tab-branch {
+  font-weight: 600;
+}
+
+.claude-panel-tab-close {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  font-size: 15px;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+  opacity: 0;
+  border-radius: 3px;
+  -webkit-app-region: no-drag;
+}
+
+.claude-panel-tab:hover .claude-panel-tab-close {
+  opacity: 0.7;
+}
+
+.claude-panel-tab-close:hover {
+  opacity: 1;
+  color: var(--fg-primary);
+  background: var(--surface-2);
+}
+
+.claude-panel-tab-add-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  -webkit-app-region: no-drag;
+}
+
+.claude-panel-tab-add {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 8px;
+  line-height: 1;
+  height: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.claude-panel-tab-add:hover {
+  color: var(--fg-primary);
+  background: var(--surface-1);
+}
+
+/* Worktree picker popover */
+.claude-panel-worktree-picker {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 100;
+  min-width: 240px;
+  max-width: 360px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  padding: 4px 0;
+  -webkit-app-region: no-drag;
+}
+
+.claude-panel-worktree-row {
+  display: flex;
+  align-items: center;
+}
+
+.claude-panel-worktree-row:hover {
+  background: var(--surface-2);
+}
+
+.claude-panel-worktree-item {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--fg-primary);
+  -webkit-app-region: no-drag;
+}
+
+/* Standalone item (not inside a row) — full width hover */
+.claude-panel-worktree-item:hover {
+  background: var(--surface-2);
+}
+
+/* Inside a row, item hover is handled by the row */
+.claude-panel-worktree-row .claude-panel-worktree-item:hover {
+  background: none;
+}
+
+.claude-panel-worktree-remove {
+  background: none;
+  border: none;
+  color: var(--text-secondary, #888);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 6px 10px;
+  line-height: 1;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.claude-panel-worktree-remove:hover {
+  color: var(--error, #e55);
+}
+
+.claude-panel-worktree-item-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.claude-panel-worktree-item-hint {
+  font-size: 10px;
+  color: var(--text-secondary, #888);
+}
+
+.claude-panel-worktree-item-path {
+  font-size: 10px;
+  color: var(--text-secondary, #888);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.claude-panel-worktree-loading {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-secondary, #888);
+}
+
+.claude-panel-worktree-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.claude-panel-worktree-header {
+  padding: 4px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-secondary, #888);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 /* Title bar Claude button (macOS) */

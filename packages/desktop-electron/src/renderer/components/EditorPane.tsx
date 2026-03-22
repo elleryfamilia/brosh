@@ -233,7 +233,7 @@ export function EditorPane({
 
   // Copy file path to clipboard
   const handleCopyPath = useCallback(() => {
-    navigator.clipboard.writeText(filePath);
+    window.terminalAPI.clipboardWriteText(filePath);
   }, [filePath]);
 
   // Common editor options

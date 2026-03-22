@@ -185,7 +185,8 @@ export function App() {
   const [claudePanelSessionId, setClaudePanelSessionId] = useState<string | null>(null);
   const [claudePanelWidth, setClaudePanelWidth] = useState(() => {
     const stored = localStorage.getItem('claudePanelWidth');
-    return stored ? Math.max(300, Math.min(800, parseInt(stored, 10) || 400)) : 400;
+    const maxWidth = Math.max(400, window.innerWidth - 200);
+    return stored ? Math.max(300, Math.min(maxWidth, parseInt(stored, 10) || 400)) : 400;
   });
 
 
@@ -658,7 +659,7 @@ export function App() {
   }, []);
 
   // Handle "Add to Chat" — paste selected text into the Claude panel terminal
-  const handleAddToChat = useCallback((sessionId: string, text: string) => {
+  const handleAddToChat = useCallback((_sessionId: string, text: string) => {
     if (!claudePanelSessionId) return;
     window.terminalAPI.input(claudePanelSessionId, text);
   }, [claudePanelSessionId]);
@@ -681,10 +682,11 @@ export function App() {
 
   // Handle Claude panel resize
   const handleClaudePanelResize = useCallback((width: number) => {
-    const clamped = Math.max(300, Math.min(800, width));
+    const maxWidth = Math.max(400, window.innerWidth - sidebarWidth - 100);
+    const clamped = Math.max(300, Math.min(maxWidth, width));
     setClaudePanelWidth(clamped);
     localStorage.setItem('claudePanelWidth', String(clamped));
-  }, []);
+  }, [sidebarWidth]);
 
   // Handle context menu open
   const handleContextMenu = useCallback(
@@ -1648,7 +1650,7 @@ export function App() {
           <Suspense fallback={null}>
             <ClaudePanel
               sessionId={claudePanelSessionId}
-              onSessionCreated={setClaudePanelSessionId}
+              onSessionCreated={(sid: string | null) => setClaudePanelSessionId(sid as string)}
               width={claudePanelWidth}
               onResize={handleClaudePanelResize}
               onClose={() => setShowClaudePanel(false)}

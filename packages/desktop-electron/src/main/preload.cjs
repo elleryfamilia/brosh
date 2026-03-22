@@ -6,10 +6,14 @@
  * but exposes only specific, safe functionality to the renderer.
  */
 
-const { contextBridge, ipcRenderer, webUtils } = require("electron");
+const { contextBridge, ipcRenderer, webUtils, clipboard } = require("electron");
 
 // Expose the API to the renderer
 contextBridge.exposeInMainWorld("terminalAPI", {
+  // Clipboard (uses Electron's clipboard module — no focus/permission requirement)
+  clipboardWriteText: (text) => clipboard.writeText(text),
+  clipboardReadText: () => clipboard.readText(),
+
   // Session management
   createSession: (options) => ipcRenderer.invoke("terminal:create", options),
   closeSession: (sessionId) => ipcRenderer.invoke("terminal:close", sessionId),
@@ -238,6 +242,15 @@ contextBridge.exposeInMainWorld("terminalAPI", {
   gitListMarkdownFiles: (cwd) => ipcRenderer.invoke("git:listMarkdownFiles", cwd),
   discoverMemoryFiles: (cwd) => ipcRenderer.invoke("context:discoverMemoryFiles", cwd),
 
+  // File directory watching (Files plugin auto-refresh)
+  fileWatchDirs: (dirs) => ipcRenderer.invoke("file:watch-dirs", dirs),
+  fileWatchStop: () => ipcRenderer.invoke("file:watch-stop"),
+  onFilesDirChanged: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on("files:dir-changed", handler);
+    return () => ipcRenderer.removeListener("files:dir-changed", handler);
+  },
+
   // Git status (for status bar)
   getGitStatus: (cwd) => ipcRenderer.invoke("git:getStatus", cwd),
   onGitChanged: (callback) => {
@@ -249,6 +262,14 @@ contextBridge.exposeInMainWorld("terminalAPI", {
   // Git root
   getGitRoot: (cwd) => ipcRenderer.invoke("git:getRoot", cwd),
   gitCheckIgnore: (paths) => ipcRenderer.invoke("git:checkIgnore", paths),
+  gitListWorktrees: (cwd) => ipcRenderer.invoke("git:listWorktrees", cwd),
+  gitRemoveWorktree: (worktreePath) => ipcRenderer.invoke("git:removeWorktree", worktreePath),
+  gitGetCommonDir: (cwd) => ipcRenderer.invoke("git:getCommonDir", cwd),
+
+  // Claude agent sessions
+  claudeGetActiveSessions: (projectCwd) => ipcRenderer.invoke("claude:getActiveSessions", projectCwd),
+  claudeSetAgentTeams: (enabled) => ipcRenderer.invoke("claude:setAgentTeams", enabled),
+  claudeGetAgentTeams: () => ipcRenderer.invoke("claude:getAgentTeams"),
 
   // Git commits
   getGitCommits: (cwd, count) => ipcRenderer.invoke("git:getCommits", cwd, count),
