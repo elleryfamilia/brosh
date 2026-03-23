@@ -85,6 +85,7 @@ Tool Proxy Server <-----------------> Socket Client
 - [Sandbox Mode](./sandbox.md) -- Security restrictions for filesystem and network
 - [Examples](./examples.md) -- CLI/MCP usage examples and common patterns
 - [Architecture](./architecture.md) -- Technical architecture and development guide
+- [Performance Optimization Plan](./performance-optimization-plan.md) -- Concrete non-rewrite performance work
 
 ## Requirements
 
