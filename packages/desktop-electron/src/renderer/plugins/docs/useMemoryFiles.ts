@@ -8,6 +8,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { MemoryFileInfo } from '../../types/electron';
+import { terminalEvents } from '../../hooks/terminalEventStore';
 
 interface UseMemoryFilesParams {
   getFocusedSessionId: () => string | null;
@@ -73,13 +74,11 @@ export function useMemoryFiles({
       if (isActive) fetchFiles();
     });
 
-    const cleanupTerminalEvents = window.terminalAPI.onMessage((message: unknown) => {
-      const msg = message as { type: string; sessionId?: string };
+    const cleanupTerminalEvents = terminalEvents.subscribe('cwd-changed', (message: unknown) => {
+      const msg = message as { sessionId?: string };
       const sessionId = getFocusedSessionId();
       if (msg.sessionId !== sessionId) return;
-      if (msg.type === 'cwd-changed') {
-        fetchFiles();
-      }
+      fetchFiles();
     });
 
     const handleVisibilityChange = () => {

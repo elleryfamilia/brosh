@@ -27,6 +27,7 @@ import type { TerminalMethods } from "./components/Terminal";
 import { FindBar } from "./components/FindBar";
 import { ZoomOverlay } from "./components/ZoomOverlay";
 import { useSettings } from "./settings";
+import { terminalEvents } from "./hooks/terminalEventStore";
 const SettingsPanel = lazy(() =>
   import("./settings/SettingsPanel").then(m => ({ default: m.SettingsPanel }))
 );
@@ -106,6 +107,12 @@ function calculateTerminalSize() {
 
 
 export function App() {
+  // Initialize centralized terminal event store (single IPC subscription)
+  useEffect(() => {
+    terminalEvents.start();
+    return () => terminalEvents.stop();
+  }, []);
+
   const [rootPane, setRootPane] = useState<Pane | null>(null);
   const [focusedPaneId, setFocusedPaneId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1055,13 +1062,12 @@ export function App() {
 
   // Listen for session close events
   useEffect(() => {
-    const cleanup = window.terminalAPI.onMessage((message: unknown) => {
-      const msg = message as { type: string; sessionId?: string };
-      if (msg.type === "session-closed" && msg.sessionId) {
+    return terminalEvents.subscribe('session-closed', (message: unknown) => {
+      const msg = message as { sessionId?: string };
+      if (msg.sessionId) {
         handleSessionClose(msg.sessionId);
       }
     });
-    return cleanup;
   }, [handleSessionClose]);
 
   // Track previous MCP attachment state for toast notification
@@ -1262,27 +1268,25 @@ export function App() {
 
   // Track focused CWD from terminal events (for Claude button visibility)
   useEffect(() => {
-    const cleanup = window.terminalAPI.onMessage((message: unknown) => {
-      const msg = message as { type: string; sessionId?: string; cwd?: string };
-      if (msg.type === 'cwd-changed' && msg.cwd) {
+    return terminalEvents.subscribe('cwd-changed', (message: unknown) => {
+      const msg = message as { sessionId?: string; cwd?: string };
+      if (msg.cwd) {
         const sessionId = getFocusedSessionId();
         if (msg.sessionId === sessionId) {
           setFocusedCwd(msg.cwd);
         }
       }
     });
-    return cleanup;
   }, [getFocusedSessionId]);
 
   // Listen for process change events
   useEffect(() => {
-    const cleanup = window.terminalAPI.onMessage((message: unknown) => {
+    const cleanup = terminalEvents.subscribe('process-changed', (message: unknown) => {
       const msg = message as {
-        type: string;
         sessionId?: string;
         process?: string;
       };
-      if (msg.type === "process-changed" && msg.sessionId && msg.process) {
+      if (msg.sessionId && msg.process) {
         const newProcess = msg.process as string;
         const sid = msg.sessionId as string;
 
@@ -1317,24 +1321,22 @@ export function App() {
 
   // Listen for window title change events (OSC sequences from applications like Claude Code)
   useEffect(() => {
-    const cleanup = window.terminalAPI.onMessage((message: unknown) => {
+    return terminalEvents.subscribe('title-changed', (message: unknown) => {
       const msg = message as {
-        type: string;
         sessionId?: string;
         title?: string;
       };
-      if (msg.type === "title-changed" && msg.sessionId) {
+      if (msg.sessionId) {
         setRootPane((prev) =>
           prev ? updateWindowTitle(prev, msg.sessionId as string, msg.title) : prev
         );
       }
     });
-    return cleanup;
   }, []);
 
   // Listen for error detection events
   useEffect(() => {
-    const cleanup = window.terminalAPI.onMessage((message: unknown) => {
+    return terminalEvents.subscribeMany(['error-detected', 'error-dismissed'], (message: unknown) => {
       const msg = message as {
         type: string;
         sessionId?: string;
@@ -1363,7 +1365,6 @@ export function App() {
         });
       }
     });
-    return cleanup;
   }, []);
 
   // Dismiss error notification handler

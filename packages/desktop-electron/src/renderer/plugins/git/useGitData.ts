@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { GitStatus, GitCommit } from '../../components/smart-status-bar/types';
+import { terminalEvents } from '../../hooks/terminalEventStore';
 
 interface UseGitDataParams {
   /** Function to get focused terminal session ID without stale closures */
@@ -134,30 +135,27 @@ export function useGitData({ getFocusedSessionId, isActive, focusedSessionId }: 
       fetchGitStatus();
     });
 
-    // Poll git status every 3s so external edits (Claude Code, other editors)
+    // Poll git status so external edits (Claude Code, other editors)
     // are detected without relying on file watchers.
+    // Use 3s when sidebar is active, 10s otherwise. Skip when document is hidden.
     const pollInterval = setInterval(() => {
+      if (document.hidden) return;
       fetchGitStatus();
-    }, 3000);
+    }, isActive ? 3000 : 10000);
 
-    const cleanupTerminalEvents = window.terminalAPI.onMessage((message: unknown) => {
-      const msg = message as {
-        type: string;
-        sessionId?: string;
-        cwd?: string;
-        mark?: { type: string };
-      };
-
+    const cleanupCwd = terminalEvents.subscribe('cwd-changed', (message: unknown) => {
+      const msg = message as { sessionId?: string };
       const sessionId = getFocusedSessionId();
       if (msg.sessionId !== sessionId) return;
+      fetchGitStatus();
+      fetchGitCommits();
+    });
 
-      if (msg.type === 'cwd-changed') {
-        fetchGitStatus();
-        fetchGitCommits();
-        return;
-      }
-
-      if (msg.type === 'command-mark' && msg.mark?.type === 'command-end') {
+    const cleanupMarks = terminalEvents.subscribe('command-mark', (message: unknown) => {
+      const msg = message as { sessionId?: string; mark?: { type: string } };
+      const sessionId = getFocusedSessionId();
+      if (msg.sessionId !== sessionId) return;
+      if (msg.mark?.type === 'command-end') {
         fetchGitStatus();
         fetchGitCommits();
       }
@@ -174,10 +172,11 @@ export function useGitData({ getFocusedSessionId, isActive, focusedSessionId }: 
     return () => {
       cleanupGitWatcher();
       clearInterval(pollInterval);
-      cleanupTerminalEvents();
+      cleanupCwd();
+      cleanupMarks();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchGitStatus, fetchGitCommits, getFocusedSessionId]);
+  }, [fetchGitStatus, fetchGitCommits, getFocusedSessionId, isActive]);
 
   // Fetch commits when sidebar opens
   useEffect(() => {

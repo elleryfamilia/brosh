@@ -10,6 +10,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Terminal } from "./Terminal";
 import { ClaudePermissionsPrompt } from "./ClaudePermissionsPrompt";
 import { useSettings } from "../settings";
+import { terminalEvents } from "../hooks/terminalEventStore";
 
 /** Escape a path for safe shell usage (single-quote wrapping). */
 function shellEscape(p: string): string {
@@ -74,9 +75,8 @@ export function ClaudeTabContent({
   useEffect(() => {
     if (!launchSessionId || !launchCwd || !sessionId) return;
 
-    const cleanup = window.terminalAPI.onMessage((message: unknown) => {
-      const msg = message as { type: string; sessionId?: string; cwd?: string };
-      if (msg.type !== "cwd-changed") return;
+    const cleanup = terminalEvents.subscribe('cwd-changed', (message: unknown) => {
+      const msg = message as { sessionId?: string; cwd?: string };
       if (msg.sessionId !== launchSessionId) return;
       if (!msg.cwd || msg.cwd === launchCwd) return;
 

@@ -17,9 +17,16 @@ import { SearchAddon } from "@xterm/addon-search";
 import "@xterm/xterm/css/xterm.css";
 import { useSettings } from "../settings";
 import type { Theme } from "../settings";
+import { terminalEvents } from "../hooks/terminalEventStore";
 
 // Reuse TextDecoder instance to avoid allocating a new one per output chunk
 const textDecoder = new TextDecoder();
+
+// --- Performance instrumentation (gated on localStorage brosh:perf) ---
+let perfMountedTerminals = 0;
+const isPerfEnabled = () => {
+  try { return localStorage.getItem('brosh:perf') === '1'; } catch { return false; }
+};
 
 /**
  * Escape a file path for safe shell usage.
@@ -193,60 +200,88 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
   const onFileLinkRef = useRef(onFileLink);
   onFileLinkRef.current = onFileLink;
 
+  // --- Performance instrumentation ---
+  const perfRef = useRef({ writes: 0, bytes: 0, decodeTimeMs: 0, start: Date.now() });
+  useEffect(() => {
+    perfMountedTerminals++;
+    const perf = isPerfEnabled();
+    const interval = perf ? setInterval(() => {
+      const p = perfRef.current;
+      const elapsed = (Date.now() - p.start) / 1000;
+      if (elapsed > 0 && p.writes > 0) {
+        console.log(`[perf:renderer:${sessionId}] writes/s=${(p.writes / elapsed).toFixed(1)} bytes/s=${(p.bytes / elapsed).toFixed(0)} avgDecode=${(p.decodeTimeMs / p.writes).toFixed(2)}ms mounted=${perfMountedTerminals}`);
+      }
+    }, 5000) : null;
+    return () => {
+      perfMountedTerminals--;
+      if (interval) clearInterval(interval);
+    };
+  }, [sessionId]);
+
   // Get settings and theme
   const { settings, theme } = useSettings();
 
   // Build xterm theme from current theme
   const xtermTheme = useMemo(() => buildXtermTheme(theme), [theme]);
 
+  // --- Renderer write batching ---
+  const pendingWriteRef = useRef<string[]>([]);
+  const writeRafRef = useRef<number | null>(null);
+
   // Handle terminal output from backend.
-  // When the user has scrolled back, pin the viewport so incoming output
+  // Queues output and writes to xterm once per animation frame.
+  // When the user has scrolled back, pins the viewport so incoming output
   // doesn't yank it away (mirrors iTerm2 / Kitty behaviour).
   const handleOutput = useCallback((data: string) => {
     if (!xtermRef.current) return;
 
-    if (claudeMode) {
-      // Claude mode: avoid using userScrolledBackRef which gets corrupted
-      // during ink's rapid alternate buffer cycling. Instead, check the
-      // actual DOM scroll position at write time.
-      //
-      // During buffer transitions (cooldown active) or while in the alternate
-      // buffer, just write normally — ink manages its own viewport.
-      if (isInAlternateBufferRef.current || bufferCooldownRef.current) {
-        xtermRef.current.write(data);
-        return;
-      }
+    pendingWriteRef.current.push(data);
 
-      // Normal buffer, no transition — check actual DOM position
-      const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
-      if (viewport) {
-        const scrollTop = viewport.scrollTop;
-        const maxScroll = viewport.scrollHeight - viewport.clientHeight;
-        const isAtBottom = maxScroll <= 1 || scrollTop >= maxScroll - 1;
+    if (writeRafRef.current === null) {
+      writeRafRef.current = requestAnimationFrame(() => {
+        writeRafRef.current = null;
+        if (!xtermRef.current || pendingWriteRef.current.length === 0) return;
 
-        if (!isAtBottom) {
-          xtermRef.current.write(data, () => {
-            viewport.scrollTop = scrollTop;
-          });
+        const batch = pendingWriteRef.current.join('');
+        pendingWriteRef.current = [];
+
+        if (claudeMode) {
+          if (isInAlternateBufferRef.current || bufferCooldownRef.current) {
+            xtermRef.current.write(batch);
+            return;
+          }
+
+          const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
+          if (viewport) {
+            const scrollTop = viewport.scrollTop;
+            const maxScroll = viewport.scrollHeight - viewport.clientHeight;
+            const isAtBottom = maxScroll <= 1 || scrollTop >= maxScroll - 1;
+
+            if (!isAtBottom) {
+              xtermRef.current.write(batch, () => {
+                viewport.scrollTop = scrollTop;
+              });
+              return;
+            }
+          }
+          xtermRef.current.write(batch);
           return;
         }
-      }
-      xtermRef.current.write(data);
-      return;
-    }
 
-    // Normal mode: use userScrolledBackRef flag
-    if (userScrolledBackRef.current && !isInAlternateBufferRef.current) {
-      const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
-      const scrollTop = viewport?.scrollTop ?? null;
+        // Normal mode: use userScrolledBackRef flag
+        if (userScrolledBackRef.current && !isInAlternateBufferRef.current) {
+          const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
+          const scrollTop = viewport?.scrollTop ?? null;
 
-      xtermRef.current.write(data, () => {
-        if (viewport && scrollTop != null) {
-          viewport.scrollTop = scrollTop;
+          xtermRef.current.write(batch, () => {
+            if (viewport && scrollTop != null) {
+              viewport.scrollTop = scrollTop;
+            }
+          });
+        } else {
+          xtermRef.current.write(batch);
         }
       });
-    } else {
-      xtermRef.current.write(data);
     }
   }, [claudeMode]);
 
@@ -377,7 +412,7 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       cursorBlink: settings.terminal.cursorBlink,
       cursorStyle: settings.terminal.cursorStyle,
       allowProposedApi: true,
-      scrollback: settings.terminal.scrollbackLines,
+      scrollback: claudeMode ? 2000 : settings.terminal.scrollbackLines,
       // Disable ligatures via font features if setting is off
       fontWeightBold: "bold",
     });
@@ -426,44 +461,50 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
     // clipboard sync, search) but aren't needed for initial rendering.
     requestAnimationFrame(() => {
       // Load WebLinksAddon for clickable URLs (including file:// links)
-      try {
-        const urlRegex = /(?:https?|file):\/\/[^\s`'"()<>\[\]]+/;
+      // Skip for Claude mode — links in Claude output are not interactive
+      if (!claudeMode) {
+        try {
+          const urlRegex = /(?:https?|file):\/\/[^\s`'"()<>\[\]]+/;
 
-        const webLinksAddon = new WebLinksAddon((event, uri) => {
-          event.preventDefault();
+          const webLinksAddon = new WebLinksAddon((event, uri) => {
+            event.preventDefault();
 
-          if (uri.startsWith('file://')) {
-            const filePath = uri.slice(7);
-            const isDiff = event.shiftKey;
-            if (onFileLinkRef.current) {
-              onFileLinkRef.current(filePath, isDiff);
+            if (uri.startsWith('file://')) {
+              const filePath = uri.slice(7);
+              const isDiff = event.shiftKey;
+              if (onFileLinkRef.current) {
+                onFileLinkRef.current(filePath, isDiff);
+              }
+            } else {
+              window.terminalAPI.openExternal(uri).catch(console.error);
             }
-          } else {
-            window.terminalAPI.openExternal(uri).catch(console.error);
-          }
-        }, {
-          urlRegex,
-        });
-        xterm.loadAddon(webLinksAddon);
-        webLinksAddonRef.current = webLinksAddon;
-      } catch (e) {
-        console.warn("WebLinks addon not available:", e);
+          }, {
+            urlRegex,
+          });
+          xterm.loadAddon(webLinksAddon);
+          webLinksAddonRef.current = webLinksAddon;
+        } catch (e) {
+          console.warn("WebLinks addon not available:", e);
+        }
       }
 
       // Load ImageAddon for SIXEL and iTerm2 IIP (OSC 1337) inline images
-      try {
-        const imageAddon = new ImageAddon({
-          enableSizeReports: true,
-          pixelLimit: 16777216,
-          storageLimit: 128,
-          showPlaceholder: true,
-          sixelSupport: true,
-          sixelScrolling: true,
-        });
-        xterm.loadAddon(imageAddon);
-        imageAddonRef.current = imageAddon;
-      } catch (e) {
-        console.warn("Image addon not available:", e);
+      // Skip for Claude mode — no SIXEL output expected
+      if (!claudeMode) {
+        try {
+          const imageAddon = new ImageAddon({
+            enableSizeReports: true,
+            pixelLimit: 16777216,
+            storageLimit: 128,
+            showPlaceholder: true,
+            sixelSupport: true,
+            sixelScrolling: true,
+          });
+          xterm.loadAddon(imageAddon);
+          imageAddonRef.current = imageAddon;
+        } catch (e) {
+          console.warn("Image addon not available:", e);
+        }
       }
 
       // Load ClipboardAddon for OSC 52 clipboard sync (zellij, tmux, vim over SSH)
@@ -476,12 +517,15 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
       }
 
       // Load SearchAddon for find functionality (Cmd/Ctrl+F)
-      try {
-        const searchAddon = new SearchAddon();
-        xterm.loadAddon(searchAddon);
-        searchAddonRef.current = searchAddon;
-      } catch (e) {
-        console.warn("Search addon not available:", e);
+      // Skip for Claude mode — defer until needed
+      if (!claudeMode) {
+        try {
+          const searchAddon = new SearchAddon();
+          xterm.loadAddon(searchAddon);
+          searchAddonRef.current = searchAddon;
+        } catch (e) {
+          console.warn("Search addon not available:", e);
+        }
       }
     });
 
@@ -916,6 +960,11 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
     // Clean up
     const container = containerRef.current;
     return () => {
+      if (writeRafRef.current !== null) {
+        cancelAnimationFrame(writeRafRef.current);
+        writeRafRef.current = null;
+      }
+      pendingWriteRef.current = [];
       if (resizeTimeoutRef.current) {
         clearTimeout(resizeTimeoutRef.current);
       }
@@ -1012,76 +1061,62 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
     restoreScrollPosition,
   ]);
 
-  // Set up message listener
+  // Set up message listeners via centralized event store
   useEffect(() => {
-    const cleanup = window.terminalAPI.onMessage((message: unknown) => {
-      const msg = message as {
-        type: string;
-        sessionId?: string;
-        data?: string;
-        exitCode?: number;
-        mark?: { type: string; exitCode?: number };
-      };
-
-      // Only handle messages for this session
+    const cleanupOutput = terminalEvents.subscribe('output', (message: unknown) => {
+      const msg = message as { sessionId?: string; data?: string };
       if (msg.sessionId && msg.sessionId !== sessionId) return;
+      if (msg.data) {
+        const t0 = perfRef.current.writes > 0 || isPerfEnabled() ? performance.now() : 0;
+        const binaryString = atob(msg.data);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const decoded = textDecoder.decode(bytes);
+        if (t0 > 0) {
+          perfRef.current.decodeTimeMs += performance.now() - t0;
+          perfRef.current.writes++;
+          perfRef.current.bytes += decoded.length;
+        }
+        handleOutput(decoded);
 
-      switch (msg.type) {
-        case "output":
-          if (msg.data) {
-            // Decode base64 data with proper UTF-8 support
-            const binaryString = atob(msg.data);
-            const bytes = new Uint8Array(binaryString.length);
-            for (let i = 0; i < binaryString.length; i++) {
-              bytes[i] = binaryString.charCodeAt(i);
-            }
-            const decoded = textDecoder.decode(bytes);
-            handleOutput(decoded);
-
-            // Update current row for shell integration tracking
-            if (xtermRef.current) {
-              const buffer = xtermRef.current.buffer.active;
-              currentRowRef.current = buffer.cursorY + buffer.baseY;
-            }
-          }
-          break;
-
-        case "session-closed":
-          handleSessionClose();
-          break;
-
-        case "resize":
-          // Backend confirmed resize, nothing to do
-          break;
-
-        case "command-mark":
-          // Handle OSC 133 shell integration marks
-          if (msg.mark && xtermRef.current) {
-            const buffer = xtermRef.current.buffer.active;
-            const currentRow = buffer.cursorY + buffer.baseY;
-
-            // Add mark with current row position
-            const newMark = {
-              type: msg.mark.type as 'prompt-start' | 'command-start' | 'output-start' | 'command-end',
-              row: currentRow,
-              exitCode: msg.mark.exitCode,
-            };
-            commandMarksRef.current.push(newMark);
-
-            // Limit stored marks to prevent memory growth (keep last 1000)
-            if (commandMarksRef.current.length > 1000) {
-              commandMarksRef.current = commandMarksRef.current.slice(-500);
-            }
-          }
-          break;
-
-        default:
-          // Ignore unknown message types
-          break;
+        if (xtermRef.current) {
+          const buffer = xtermRef.current.buffer.active;
+          currentRowRef.current = buffer.cursorY + buffer.baseY;
+        }
       }
     });
 
-    return cleanup;
+    const cleanupClose = terminalEvents.subscribe('session-closed', (message: unknown) => {
+      const msg = message as { sessionId?: string };
+      if (msg.sessionId && msg.sessionId !== sessionId) return;
+      handleSessionClose();
+    });
+
+    const cleanupMarks = terminalEvents.subscribe('command-mark', (message: unknown) => {
+      const msg = message as { sessionId?: string; mark?: { type: string; exitCode?: number } };
+      if (msg.sessionId && msg.sessionId !== sessionId) return;
+      if (msg.mark && xtermRef.current) {
+        const buffer = xtermRef.current.buffer.active;
+        const currentRow = buffer.cursorY + buffer.baseY;
+        const newMark = {
+          type: msg.mark.type as 'prompt-start' | 'command-start' | 'output-start' | 'command-end',
+          row: currentRow,
+          exitCode: msg.mark.exitCode,
+        };
+        commandMarksRef.current.push(newMark);
+        if (commandMarksRef.current.length > 1000) {
+          commandMarksRef.current = commandMarksRef.current.slice(-500);
+        }
+      }
+    });
+
+    return () => {
+      cleanupOutput();
+      cleanupClose();
+      cleanupMarks();
+    };
   }, [sessionId, handleOutput, handleSessionClose]);
 
   // Set up typo suggestion listener

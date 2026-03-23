@@ -5,6 +5,8 @@ import * as path from "path";
 import { execSync } from "child_process";
 import xtermHeadless from "@xterm/headless";
 const { Terminal } = xtermHeadless;
+import serializeAddon from "@xterm/addon-serialize";
+const { SerializeAddon } = serializeAddon;
 import { getDefaultShell } from "../utils/platform.js";
 import { setEnv } from "../utils/env.js";
 import type { SandboxController } from "../sandbox/index.js";
@@ -277,6 +279,7 @@ export interface ScreenshotResult {
 export class TerminalSession {
   private ptyProcess!: pty.IPty;
   private terminal!: InstanceType<typeof Terminal>;
+  private serializeAddon!: InstanceType<typeof SerializeAddon>;
   private disposed = false;
   private dataListeners: Array<(data: string) => void> = [];
   private exitListeners: Array<(code: number) => void> = [];
@@ -544,6 +547,8 @@ ${bannerCmd}
       scrollback: 1000,
       allowProposedApi: true,
     });
+    this.serializeAddon = new SerializeAddon();
+    this.terminal.loadAddon(this.serializeAddon);
 
     // Determine shell type and set up custom prompt (unless nativeShell is enabled)
     const shellName = path.basename(shell);
@@ -807,30 +812,32 @@ add-zsh-hook preexec __brosh_preexec
   }
 
   /**
-   * Get the current terminal buffer content as plain text
+   * Get the current terminal buffer content.
+   * Uses the serialize addon to preserve ANSI formatting (colors, bold, etc.)
+   * so that rehydrated terminals look correct.
    */
   getContent(): string {
     if (this.disposed) {
       throw new Error("Terminal session has been disposed");
     }
 
-    const buffer = this.terminal.buffer.active;
-    const lines: string[] = [];
-
-    // Get all lines from the buffer (including scrollback)
-    for (let i = 0; i < buffer.length; i++) {
-      const line = buffer.getLine(i);
-      if (line) {
-        lines.push(line.translateToString(true));
+    try {
+      return this.serializeAddon.serialize();
+    } catch {
+      // Fallback to plain text if serialize fails
+      const buffer = this.terminal.buffer.active;
+      const lines: string[] = [];
+      for (let i = 0; i < buffer.length; i++) {
+        const line = buffer.getLine(i);
+        if (line) {
+          lines.push(line.translateToString(true));
+        }
       }
+      while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
+        lines.pop();
+      }
+      return lines.join("\n");
     }
-
-    // Trim trailing empty lines
-    while (lines.length > 0 && lines[lines.length - 1].trim() === "") {
-      lines.pop();
-    }
-
-    return lines.join("\n");
   }
 
   /**

@@ -7,6 +7,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { updateDocsBadgeCache } from './useBadgeState';
+import { terminalEvents } from '../../hooks/terminalEventStore';
 
 export interface DocFile {
   /** Relative path from git root (e.g. "docs/api/setup.md") */
@@ -134,17 +135,15 @@ export function useDocsData({
       fetchFiles();
     });
 
-    const cleanupTerminalEvents = window.terminalAPI.onMessage((message: unknown) => {
-      const msg = message as { type: string; sessionId?: string };
+    const cleanupTerminalEvents = terminalEvents.subscribe('cwd-changed', (message: unknown) => {
+      const msg = message as { sessionId?: string };
       const sessionId = getFocusedSessionId();
       if (msg.sessionId !== sessionId) return;
-      if (msg.type === 'cwd-changed') {
-        fetchFiles();
-      }
+      fetchFiles();
     });
 
     const handleVisibilityChange = () => {
-      if (!document.hidden) fetchFiles();
+      if (!document.hidden && isActive) fetchFiles();
     };
     document.addEventListener('visibilitychange', handleVisibilityChange);
 
@@ -153,7 +152,7 @@ export function useDocsData({
       cleanupTerminalEvents();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [fetchFiles, getFocusedSessionId]);
+  }, [fetchFiles, getFocusedSessionId, isActive]);
 
   // Fetch when sidebar opens
   useEffect(() => {

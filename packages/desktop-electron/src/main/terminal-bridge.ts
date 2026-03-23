@@ -1848,15 +1848,61 @@ export class TerminalBridge {
       }, 500);
     };
 
+    // --- Performance instrumentation (gated on brosh:perf) ---
+    let perfOutputChunks = 0;
+    let perfOutputBytes = 0;
+    let perfIpcSends = 0;
+    const perfStart = Date.now();
+    const perfEnabled = process.env.BROSH_PERF === '1';
+    const perfInterval = perfEnabled ? setInterval(() => {
+      const elapsed = (Date.now() - perfStart) / 1000;
+      if (elapsed > 0 && perfOutputChunks > 0) {
+        console.log(`[perf:${sessionId}] chunks/s=${(perfOutputChunks / elapsed).toFixed(1)} bytes/s=${(perfOutputBytes / elapsed).toFixed(0)} ipc/s=${(perfIpcSends / elapsed).toFixed(1)}`);
+      }
+    }, 5000) : null;
+
+    // --- Output batching ---
+    // Buffer raw PTY output and flush on a short timer or byte threshold.
+    // Reduces IPC message count by 10-50x during high-throughput output.
+    const OUTPUT_FLUSH_MS = 8;        // ~120 fps cadence
+    const OUTPUT_FLUSH_BYTES = 64 * 1024; // 64 KB forces immediate flush
+    let outputBuffer: string[] = [];
+    let outputBufferBytes = 0;
+    let outputFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flushOutput = () => {
+      if (outputFlushTimer) { clearTimeout(outputFlushTimer); outputFlushTimer = null; }
+      if (outputBuffer.length === 0) return;
+      if (this.disposed || !this.window || this.window.isDestroyed()) {
+        outputBuffer = [];
+        outputBufferBytes = 0;
+        return;
+      }
+      const combined = outputBuffer.join('');
+      outputBuffer = [];
+      outputBufferBytes = 0;
+      const encoded = Buffer.from(combined).toString("base64");
+      if (perfEnabled) perfIpcSends++;
+      this.window.webContents.send("terminal:message", {
+        type: "output",
+        sessionId,
+        data: encoded,
+      });
+    };
+
     // Forward output and detect process/title changes via OSC sequences
     // Note: Recording is handled by manager.ts via recordOutputToAll() - don't duplicate here
     session.onData((data) => {
       if (!this.disposed && this.window && !this.window.isDestroyed()) {
-        const encoded = Buffer.from(data).toString("base64");
+        if (perfEnabled) {
+          perfOutputChunks++;
+          perfOutputBytes += data.length;
+        }
 
         // When display is off (system suspended / screen locked), buffer output
         // instead of sending IPC + triggering xterm.js rendering on an invisible canvas
         if (this.systemSuspended) {
+          const encoded = Buffer.from(data).toString("base64");
           let buf = this.suspendedOutputBuffer.get(sessionId);
           if (!buf) {
             buf = [];
@@ -1866,11 +1912,14 @@ export class TerminalBridge {
           return; // Skip all process/cwd/title checks too
         }
 
-        this.window.webContents.send("terminal:message", {
-          type: "output",
-          sessionId,
-          data: encoded,
-        });
+        // Queue output for batched IPC send
+        outputBuffer.push(data);
+        outputBufferBytes += data.length;
+        if (outputBufferBytes >= OUTPUT_FLUSH_BYTES) {
+          flushOutput();
+        } else if (!outputFlushTimer) {
+          outputFlushTimer = setTimeout(flushOutput, OUTPUT_FLUSH_MS);
+        }
 
         // Count output lines for fast-tracked commands (for retroactive erasure)
         if (this.sessionFastTracked.get(sessionId)) {
@@ -2054,6 +2103,10 @@ export class TerminalBridge {
 
     // Forward exit
     session.onExit((code) => {
+      // Flush any buffered output before sending session-closed
+      flushOutput();
+      if (outputFlushTimer) { clearTimeout(outputFlushTimer); outputFlushTimer = null; }
+      if (perfInterval) clearInterval(perfInterval);
       if (!this.disposed && this.window && !this.window.isDestroyed()) {
         this.window.webContents.send("terminal:message", {
           type: "session-closed",

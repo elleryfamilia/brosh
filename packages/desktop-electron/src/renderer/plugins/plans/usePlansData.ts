@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { PlanFileInfo } from '../../types/electron';
 import { updatePlansBadgeCache } from './useBadgeState';
+import { terminalEvents } from '../../hooks/terminalEventStore';
 
 interface UsePlansDataParams {
   getFocusedSessionId: () => string | null;
@@ -200,13 +201,11 @@ export function usePlansData({
       if (isActive) fetchPlans();
     });
 
-    const cleanupTerminalEvents = window.terminalAPI.onMessage((message: unknown) => {
-      const msg = message as { type: string; sessionId?: string };
+    const cleanupTerminalEvents = terminalEvents.subscribe('cwd-changed', (message: unknown) => {
+      const msg = message as { sessionId?: string };
       const sessionId = getFocusedSessionId();
       if (msg.sessionId !== sessionId) return;
-      if (msg.type === 'cwd-changed') {
-        fetchPlans();
-      }
+      fetchPlans();
     });
 
     return () => {
