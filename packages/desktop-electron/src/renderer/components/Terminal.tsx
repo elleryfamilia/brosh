@@ -182,6 +182,12 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
   const commandMarksRef = useRef<CommandMark[]>([]);
   const currentRowRef = useRef<number>(0);
 
+  // Claude mode: explicit "user scrolled up" flag, only set by wheel events.
+  // Unlike userScrolledBackRef (set by any scroll event including programmatic),
+  // this flag is only triggered by human interaction, so it's reliable during
+  // ink's rapid buffer cycling.
+  const claudeUserScrolledRef = useRef(false);
+
   // Buffer switching state for TUI apps (Claude CLI, vim, etc.)
   const isInAlternateBufferRef = useRef<boolean>(false);
   const savedNormalBufferScrollRef = useRef<{
@@ -246,25 +252,21 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
         pendingWriteRef.current = [];
 
         if (claudeMode) {
-          if (isInAlternateBufferRef.current || bufferCooldownRef.current) {
-            xtermRef.current.write(batch);
-            return;
-          }
-
-          const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
-          if (viewport) {
-            const scrollTop = viewport.scrollTop;
-            const maxScroll = viewport.scrollHeight - viewport.clientHeight;
-            const isAtBottom = maxScroll <= 1 || scrollTop >= maxScroll - 1;
-
-            if (!isAtBottom) {
-              xtermRef.current.write(batch, () => {
+          if (claudeUserScrolledRef.current) {
+            // User explicitly scrolled up — pin their position
+            const viewport = containerRef.current?.querySelector(".xterm-viewport") as HTMLElement | null;
+            const scrollTop = viewport?.scrollTop ?? null;
+            xtermRef.current.write(batch, () => {
+              if (viewport && scrollTop != null) {
                 viewport.scrollTop = scrollTop;
-              });
-              return;
-            }
+              }
+            });
+          } else {
+            // Default: write and snap to bottom
+            xtermRef.current.write(batch, () => {
+              xtermRef.current?.scrollToBottom();
+            });
           }
-          xtermRef.current.write(batch);
           return;
         }
 
@@ -871,12 +873,13 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
         // detection, so we don't need save/restore logic here.
         if (buffer.type === 'alternate') {
           isInAlternateBufferRef.current = true;
-          // Entering alternate — cancel any pending cooldown
+          // Entering alternate — cancel any pending cooldown and reset user scroll
           if (bufferCooldownTimeoutRef.current) {
             clearTimeout(bufferCooldownTimeoutRef.current);
             bufferCooldownTimeoutRef.current = null;
           }
           bufferCooldownRef.current = false;
+          claudeUserScrolledRef.current = false;
         } else {
           isInAlternateBufferRef.current = false;
           // Start cooldown — suppress scroll handling until we know this
@@ -1248,8 +1251,22 @@ export function Terminal({ sessionId, onClose, isVisible = true, isFocused = tru
     };
 
     // Wheel events for trackpad/mouse wheel scrolling
-    const handleWheel = () => {
+    const handleWheel = (e: WheelEvent) => {
       showScrollbar();
+      // Claude mode: track explicit user scroll-up via wheel events only.
+      // This avoids false positives from programmatic scroll changes.
+      if (claudeMode && xtermRef.current) {
+        if (e.deltaY < 0) {
+          // Scrolling up — user wants to read history
+          claudeUserScrolledRef.current = true;
+        } else if (e.deltaY > 0) {
+          // Scrolling down — check if we reached the bottom
+          const buf = xtermRef.current.buffer.active;
+          if (buf.viewportY >= buf.baseY) {
+            claudeUserScrolledRef.current = false;
+          }
+        }
+      }
     };
 
     // Also detect scrollbar drag via mousedown on the scrollbar area

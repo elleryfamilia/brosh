@@ -89,6 +89,9 @@ export function ClaudePanel({
     if (persisted.length > 0) {
       return persisted.map((p) => ({
         ...p,
+        // Clear persisted CWD for non-worktree tabs so that getCwd() resolves
+        // the live terminal directory at launch time instead of using a stale path.
+        cwd: p.worktreeName ? p.cwd : "",
         sessionId: null,
         createdAt: Date.now(),
         exited: false,
@@ -310,13 +313,13 @@ export function ClaudePanel({
             Claude Code{displayName ? <> — <strong>{displayName}</strong></> : ""}
           </span>
         </div>
+        <div className="claude-panel-header-spacer" />
         <ClaudeWorktreePicker
           tabs={tabs}
           onAddTab={handleAddTab}
           buttonClassName="claude-panel-header-add"
           currentCwd={activeTab?.cwd}
         />
-        <div className="claude-panel-header-spacer" />
         <div className="claude-panel-header-right">
           {claudeInfo.model && (
             <span className="claude-panel-model-pill">{claudeInfo.model}</span>
