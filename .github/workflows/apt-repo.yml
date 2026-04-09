@@ -126,20 +126,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          mkdir -p website/rpm
-          # Remove old RPMs and repodata
-          rm -f website/rpm/*.rpm
-          rm -rf website/rpm/repodata
-          # Download new RPMs
+          # Download RPMs to a temp dir (too large for git)
+          mkdir -p /tmp/rpm-repo
           gh release download "v${RELEASE_VERSION}" \
             --pattern "*.rpm" \
-            --dir website/rpm \
+            --dir /tmp/rpm-repo \
             --repo "${{ github.repository }}" || echo "No RPM assets found"
 
       - name: Build RPM repo metadata
+        env:
+          RELEASE_VERSION: ${{ steps.tag.outputs.version }}
         run: |
-          if ls website/rpm/*.rpm 1>/dev/null 2>&1; then
-            createrepo_c website/rpm
+          if ls /tmp/rpm-repo/*.rpm 1>/dev/null 2>&1; then
+            # Generate repodata with baseurl pointing to GitHub Releases
+            # dnf will fetch metadata from bro.sh/rpm/ but download RPMs from GitHub
+            createrepo_c \
+              --baseurl "https://github.com/${{ github.repository }}/releases/download/v${RELEASE_VERSION}" \
+              /tmp/rpm-repo
+
+            # Copy only the repodata (not the RPMs) into the website
+            rm -rf website/rpm/repodata
+            mkdir -p website/rpm
+            cp -r /tmp/rpm-repo/repodata website/rpm/
+
             # Sign the repo metadata
             gpg --batch --yes --armor --detach-sign -o website/rpm/repodata/repomd.xml.asc website/rpm/repodata/repomd.xml
           else
