@@ -1,0 +1,6 @@
+[brosh]
+name=Brosh Terminal
+baseurl=https://bro.sh/rpm
+enabled=1
+gpgcheck=1
+gpgkey=https://bro.sh/gpg.key

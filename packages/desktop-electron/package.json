@@ -184,11 +184,20 @@
       "icon": "resources/icons/png",
       "category": "Development",
       "target": [
-        "deb"
+        "deb",
+        "rpm"
       ],
       "executableName": "brosh"
     },
     "deb": {
+      "afterInstall": "build/afterInstall-linux.sh",
+      "recommends": [
+        "bubblewrap",
+        "socat",
+        "ripgrep"
+      ]
+    },
+    "rpm": {
       "afterInstall": "build/afterInstall-linux.sh",
       "recommends": [
         "bubblewrap",
