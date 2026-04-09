@@ -127,3 +127,44 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: GPG-sign RPM packages
+        if: runner.os == 'Linux'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          # Find RPMs built by electron-builder
+          RPMS=$(find packages/desktop-electron/dist -name '*.rpm' 2>/dev/null)
+          if [ -z "$RPMS" ]; then
+            echo "No RPMs found, skipping signing"
+            exit 0
+          fi
+
+          sudo apt-get install -y rpm
+
+          # Import GPG key
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format long | grep '^sec' | head -1 | awk '{print $2}' | cut -d'/' -f2)
+
+          # Configure rpmmacros for signing
+          cat > ~/.rpmmacros << MACROS
+          %_signature gpg
+          %_gpg_name $GPG_KEY_ID
+          %__gpg /usr/bin/gpg
+          %__gpg_sign_cmd %{__gpg} gpg --batch --no-verbose --no-armor --pinentry-mode loopback --yes --no-secmem-warning -u "%{_gpg_name}" -sbo %{__signature_filename} --digest-algo sha256 %{__plaintext_filename}
+          MACROS
+
+          # Sign each RPM
+          for rpm_file in $RPMS; do
+            echo "Signing $rpm_file..."
+            rpmsign --addsign "$rpm_file"
+          done
+
+          # Re-upload signed RPMs to the release (overwrite unsigned ones)
+          TAG_NAME=${GITHUB_REF#refs/tags/}
+          for rpm_file in $RPMS; do
+            echo "Uploading signed $(basename "$rpm_file")..."
+            gh release upload "$TAG_NAME" "$rpm_file" --clobber --repo "${{ github.repository }}"
+          done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
