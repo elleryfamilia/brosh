@@ -135,7 +135,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Find RPMs built by electron-builder
-          RPMS=$(find packages/desktop-electron/dist -name '*.rpm' 2>/dev/null)
+          RPMS=$(find packages/desktop-electron/release packages/desktop-electron/dist -name '*.rpm' 2>/dev/null)
           if [ -z "$RPMS" ]; then
             echo "No RPMs found, skipping signing"
             exit 0
