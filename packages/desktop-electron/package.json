@@ -199,10 +199,10 @@
     },
     "rpm": {
       "afterInstall": "build/afterInstall-linux.sh",
-      "recommends": [
-        "bubblewrap",
-        "socat",
-        "ripgrep"
+      "fpm": [
+        "--rpm-tag", "Suggests: bubblewrap",
+        "--rpm-tag", "Suggests: socat",
+        "--rpm-tag", "Suggests: ripgrep"
       ]
     }
   }
