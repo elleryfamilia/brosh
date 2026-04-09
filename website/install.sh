@@ -43,7 +43,8 @@ if [ "$PKG_TYPE" = "rpm" ]; then
 name=Brosh Terminal
 baseurl=https://bro.sh/rpm
 enabled=1
-gpgcheck=1
+gpgcheck=0
+repo_gpgcheck=1
 gpgkey=https://bro.sh/gpg.key
 REPO_EOF
   sudo dnf install -y brosh-desktop
