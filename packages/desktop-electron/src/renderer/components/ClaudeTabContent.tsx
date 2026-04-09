@@ -171,7 +171,7 @@ export function ClaudeTabContent({
 
         setTimeout(() => {
           const flags = skipPermissions
-            ? " --permission-mode dontAsk --allowedTools Bash Read Edit Write WebFetch WebSearch"
+            ? " --permission-mode bypassPermissions"
             : "";
           const cdPrefix = cwd ? `cd ${shellEscape(cwd)} && ` : "";
           window.terminalAPI.input(result.sessionId!, `${cdPrefix}claude${flags}\n`);

@@ -176,6 +176,9 @@ add-zsh-hook preexec __brosh_preexec
   if ((defaultShell === "bash" || defaultShell === "sh") && !preWarmedBashRc) {
     const homeDir = os.homedir();
     const bashRcContent = `
+# Clear brosh hooks from inherited PROMPT_COMMAND before sourcing user config
+unset PROMPT_COMMAND
+
 # Source user's login profile for PATH, aliases, etc.
 [ -f "${homeDir}/.bash_profile" ] && source "${homeDir}/.bash_profile" || {
   [ -f "${homeDir}/.bash_login" ] && source "${homeDir}/.bash_login" || {
@@ -202,7 +205,9 @@ __brosh_precmd() {
   fi
   printf '\\e]133;A\\a'
 }
-PROMPT_COMMAND="__brosh_precmd;__brosh_osc7\${PROMPT_COMMAND:+;\\$PROMPT_COMMAND}"
+# Use array form for PROMPT_COMMAND (Bash 5.1+, e.g. Fedora) while keeping
+# any entries the user's profile already set up.
+PROMPT_COMMAND=(__brosh_precmd __brosh_osc7 "\${PROMPT_COMMAND[@]}")
 
 # DEBUG trap for preexec (marks output start when command begins executing)
 trap '
@@ -328,6 +333,9 @@ export class TerminalSession {
       const homeDir = os.homedir();
       const bannerCmd = startupBanner ? `printf '%s\\n' '${escapeBannerForShell(startupBanner)}'` : "";
       const bashrcContent = `
+# Clear brosh hooks from inherited PROMPT_COMMAND before sourcing user config
+unset PROMPT_COMMAND
+
 # Source user's bashrc if it exists
 [ -f "${homeDir}/.bashrc" ] && source "${homeDir}/.bashrc"
 
@@ -570,6 +578,9 @@ ${bannerCmd}
         } else {
           const homeDir = os.homedir();
           const bashRcContent = `
+# Clear brosh hooks from inherited PROMPT_COMMAND before sourcing user config
+unset PROMPT_COMMAND
+
 # Source user's login profile for PATH, aliases, etc.
 [ -f "${homeDir}/.bash_profile" ] && source "${homeDir}/.bash_profile" || {
   [ -f "${homeDir}/.bash_login" ] && source "${homeDir}/.bash_login" || {
@@ -596,7 +607,9 @@ __brosh_precmd() {
   fi
   printf '\\e]133;A\\a'
 }
-PROMPT_COMMAND="__brosh_precmd;__brosh_osc7\${PROMPT_COMMAND:+;\\$PROMPT_COMMAND}"
+# Use array form for PROMPT_COMMAND (Bash 5.1+, e.g. Fedora) while keeping
+# any entries the user's profile already set up.
+PROMPT_COMMAND=(__brosh_precmd __brosh_osc7 "\${PROMPT_COMMAND[@]}")
 
 # DEBUG trap for preexec (marks output start when command begins executing)
 trap '
