@@ -132,6 +132,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Find RPMs built by electron-builder
           RPMS=$(find packages/desktop-electron/dist -name '*.rpm' 2>/dev/null)
@@ -166,5 +167,3 @@ jobs:
             echo "Uploading signed $(basename "$rpm_file")..."
             gh release upload "$TAG_NAME" "$rpm_file" --clobber --repo "${{ github.repository }}"
           done
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
